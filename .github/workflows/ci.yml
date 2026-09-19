@@ -21,7 +21,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
+          # No `cache: pip` — we don't have a requirements.txt / pyproject.toml
+          # at the repo root, and actions/setup-python@v5 requires one when
+          # caching is enabled. Our deps live in
+          # custom_components/haos/manifest.json (HA-specific format).
 
       - name: Install linters
         run: |
@@ -109,7 +112,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
+          # No `cache: pip` — see comment in the lint job above.
 
       - name: Install test deps
         run: |
@@ -134,7 +137,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
+          # No `cache: pip` — see comment in the lint job above.
 
       - name: Install psutil (the only mandatory dep)
         run: python -m pip install --quiet 'psutil>=5.9.0,<7.0.0'
