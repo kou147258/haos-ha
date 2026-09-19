@@ -361,14 +361,12 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         translation_key="hostname",
         name="Hostname",
         icon="mdi:server",
-        suggested_display_precision=0,
     ),
     "os": SensorEntityDescription(
         key="os",
         translation_key="os",
         name="Operating System",
         icon="mdi:linux",
-        suggested_display_precision=0,
     ),
 }
 

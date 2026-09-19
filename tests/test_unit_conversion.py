@@ -118,6 +118,19 @@ def test_integer_or_byte_sensors_use_precision_zero(key):
     )
 
 
+@pytest.mark.parametrize("key", ["hostname", "os"])
+def test_text_sensors_have_no_precision(key):
+    """Hostname / OS are text values, not numeric -- setting precision would
+    make HA assume they're numeric and crash on float() conversion."""
+    desc = _STATIC_DESCRIPTIONS[key]
+    assert desc.suggested_display_precision is None, (
+        f"{key} is text; suggested_display_precision must be None, got "
+        f"{desc.suggested_display_precision}"
+    )
+    assert desc.device_class is None
+    assert desc.state_class is None
+
+
 @pytest.mark.parametrize("key", [
     "cpu_percent",
     "cpu_temp",
