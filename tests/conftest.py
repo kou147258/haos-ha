@@ -103,6 +103,9 @@ def _install_ha_stubs() -> None:
     # const
     const = types.ModuleType("homeassistant.const")
     const.PERCENTAGE = "%"
+    # ``info.async_collect_info`` reads ``homeassistant.const.__version__``.
+    # Override per-test via patch if a specific version matters.
+    const.__version__ = "2026.8.0"
     const.Platform = types.SimpleNamespace(
         SENSOR="sensor", BINARY_SENSOR="binary_sensor", SWITCH="switch",
     )
@@ -128,9 +131,24 @@ def _install_ha_stubs() -> None:
     class HomeAssistant:  # pragma: no cover
         pass
 
+    class _States:  # pragma: no cover
+        def async_entity_ids(self):
+            return []
+
+    HomeAssistant.states = _States()
+    # ``helpers`` is patched later (once the device_registry stub module is
+    # created) so the lazy reference resolves. Tests that need different
+    # behavior typically replace hass with a MagicMock anyway.
+    HomeAssistant.helpers = types.SimpleNamespace(device_registry=None)
+
     class Config:  # pragma: no cover
         def as_dict(self):
             return {}
+
+        # ``info.async_collect_info`` reads these. Defaults keep tests
+        # hermetic; fixtures / specific tests can override per-instance.
+        location_name = "Home"
+        components = ()
 
     HomeAssistant.config = Config()
     core.HomeAssistant = HomeAssistant
@@ -191,8 +209,21 @@ def _install_ha_stubs() -> None:
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
+    class DeviceRegistry:  # pragma: no cover
+        def __init__(self):
+            self.devices: dict = {}
+
+    @core.callback
+    def async_get_device_registry(hass):
+        # Stored on hass by tests that exercise device count.
+        return getattr(hass, "_stub_device_registry", None) or DeviceRegistry()
+
     dr.DeviceInfo = DeviceInfo
+    dr.DeviceRegistry = DeviceRegistry
+    dr.async_get = async_get_device_registry
     sys.modules["homeassistant.helpers.device_registry"] = dr
+    # Backfill the stub HomeAssistant.helpers now that dr exists.
+    HomeAssistant.helpers.device_registry = dr
 
     # helpers.aiohttp_client
     aiohttp_h = types.ModuleType("homeassistant.helpers.aiohttp_client")
@@ -203,6 +234,27 @@ def _install_ha_stubs() -> None:
 
     aiohttp_h.async_get_clientsession = async_get_clientsession
     sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_h
+
+    # helpers.system_info -- ``info.async_collect_info`` calls this.
+    si = types.ModuleType("homeassistant.helpers.system_info")
+
+    async def async_get_system_info(hass):
+        # Read the stub on hass if a test set one; fall back to an empty
+        # minimal info dict so the integration's metadata extraction is a
+        # no-op rather than blowing up.
+        return getattr(hass, "_stub_system_info", None) or {
+            "installation_type": "Unknown",
+            "version": "0.0.0",
+            "hassio": False,
+            "timezone": "UTC",
+            "python_version": "3.14.0",
+            "arch": "x86_64",
+            "docker": False,
+            "dev": False,
+        }
+
+    si.async_get_system_info = async_get_system_info
+    sys.modules["homeassistant.helpers.system_info"] = si
 
     # helpers.entity_platform
     ep = types.ModuleType("homeassistant.helpers.entity_platform")

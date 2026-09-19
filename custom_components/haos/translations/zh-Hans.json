@@ -51,6 +51,7 @@
       "processes": {"name": "进程数"},
       "hostname": {"name": "主机名"},
       "os": {"name": "操作系统"},
+      "info": {"name": "环境信息"},
       "disk_percent": {"name": "{mount} 已用百分比"},
       "disk_used": {"name": "{mount} 已用"},
       "disk_free": {"name": "{mount} 可用"},

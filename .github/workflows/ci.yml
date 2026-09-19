@@ -154,6 +154,7 @@ jobs:
           test -f custom_components/haos/switch.py
           test -f custom_components/haos/config_flow.py
           test -f custom_components/haos/addon.py
+          test -f custom_components/haos/info.py
           test -f custom_components/haos/services.yaml
           test -f custom_components/haos/strings.json
           test -d custom_components/haos/translations

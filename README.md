@@ -132,6 +132,10 @@ After install you'll see one device `HAOS Dashboard` with:
 - `sensor.haos_processes`
 - `sensor.haos_hostname`
 - `sensor.haos_operating_system`
+- `sensor.haos_info` — single sensor summarising HA / Supervisor / HAOS /
+  integration / add-on versions plus live entity / device / integration
+  counts. State is a short string like `"2026.8.0 · OS · 234 entities"`;
+  everything else lives in `extra_state_attributes`.
 
 ### Binary sensor + switch
 

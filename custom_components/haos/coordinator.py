@@ -24,6 +24,11 @@ from .const import (
     MIN_SCAN_INTERVAL,
     SKIP_FS_TYPES,
 )
+from .info import (
+    _safe_device_count,
+    _safe_entity_count,
+    _safe_integration_count,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +49,10 @@ class FnOSDashboardCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_net: psutil._common.snetio | None = None
         self._last_net_ts: float | None = None
         self._cpu_sample_started: bool = False
+        # Populated by ``__init__`` in this package after ``async_collect_info``
+        # runs. Entity platforms read this to merge one-shot metadata with
+        # the live counts that come from ``_async_update_data``.
+        self.meta: dict[str, Any] | None = None
 
         super().__init__(
             hass,
@@ -53,11 +62,23 @@ class FnOSDashboardCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch a fresh snapshot. Runs in the executor because psutil calls block."""
+        """Fetch a fresh snapshot.
+
+        psutil work runs in the executor (blocking I/O). The HA registry /
+        state-machine counts are filled in on the event loop afterwards --
+        ``async_get`` is a @callback and registry dict access is cheap, but
+        we still want hass reads to happen on the main loop thread.
+        """
         try:
-            return await self.hass.async_add_executor_job(self._collect_snapshot)
+            snapshot = await self.hass.async_add_executor_job(self._collect_snapshot)
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(f"Snapshot collection failed: {err}") from err
+        snapshot["counts"] = {
+            "entity": _safe_entity_count(self.hass),
+            "device": _safe_device_count(self.hass),
+            "integration": _safe_integration_count(self.hass),
+        }
+        return snapshot
 
     def _collect_snapshot(self) -> dict[str, Any]:
         """Build a JSON-serializable snapshot of system stats.

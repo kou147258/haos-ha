@@ -21,6 +21,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN
 from .coordinator import FnOSDashboardCoordinator
+from .info import async_collect_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +37,16 @@ async def async_setup_entry(
 ) -> bool:
     """Set up HAOS Dashboard from a config entry."""
     coordinator = FnOSDashboardCoordinator(hass, entry)
+
+    # Collect one-shot HA / Supervisor / HAOS / add-on metadata BEFORE the
+    # first refresh so the info sensor has its attributes on the very first
+    # state write. Failures here are non-fatal -- the sensor still works with
+    # whatever attributes came through.
+    try:
+        coordinator.meta = await async_collect_info(hass, include_counts=False)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("async_collect_info failed; info sensor will be partial", exc_info=True)
+        coordinator.meta = None
 
     try:
         await coordinator.async_config_entry_first_refresh()

@@ -51,6 +51,7 @@
       "processes": {"name": "Processes"},
       "hostname": {"name": "Hostname"},
       "os": {"name": "Operating System"},
+      "info": {"name": "Info"},
       "disk_percent": {"name": "{mount} % Used"},
       "disk_used": {"name": "{mount} Used"},
       "disk_free": {"name": "{mount} Free"},

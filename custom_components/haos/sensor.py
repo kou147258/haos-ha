@@ -37,6 +37,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DEFAULT_TEMP_UNIT, DOMAIN, MANUFACTURER, TEMP_UNITS
 from .coordinator import FnOSDashboardCoordinator
+from .info import build_attributes, build_state_string
 
 
 async def async_setup_entry(
@@ -77,6 +78,11 @@ async def async_setup_entry(
 
     data = coordinator.data or {}
     cpu = data.get("cpu", {})
+
+    # Info sensor is always added; its attributes come from the coordinator's
+    # ``meta`` (set by ``__init__`` via ``async_collect_info``) plus the
+    # ``counts`` block that every coordinator tick appends.
+    entities.append(InfoSensor(coordinator, entry))
     for index in range(len(cpu.get("per_core", []))):
         entities.append(
             PerCoreCpuSensor(coordinator, entry, index, temp_unit_const)
@@ -563,6 +569,66 @@ class TemperatureSensor(_BaseSensor):
                     attrs["critical"] = temp["critical"]
                 return attrs
         return None
+
+
+class InfoSensor(_BaseSensor):
+    """Single sensor summarising HA / Supervisor / HAOS / add-on metadata.
+
+    State is a short human-readable string (``"2026.8.0 · OS · 234 entities"``);
+    every other field lands in ``extra_state_attributes``. Counts refresh with
+    the coordinator's main tick; everything else is captured once at setup
+    and stays put until the integration reloads.
+    """
+
+    _attr_icon = "mdi:information-outline"
+    # Deliberately NOT setting device_class / state_class / unit: this is a
+    # text summary, not a measurement.
+
+    def __init__(
+        self,
+        coordinator: FnOSDashboardCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_info"
+        self._attr_translation_key = "info"
+
+    @property
+    def name(self) -> str | None:
+        return "Info"
+
+    @property
+    def native_value(self) -> str | None:
+        info = self._compose_info()
+        if not info:
+            return None
+        return build_state_string(info)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        info = self._compose_info()
+        if not info:
+            return None
+        attrs = build_attributes(info)
+        # Add the coordinator's last-refresh timestamp so consumers can see
+        # when the counts were last refreshed alongside the snapshot version.
+        data = self.coordinator.data or {}
+        ts = data.get("ts")
+        if isinstance(ts, (int, float)):
+            attrs["integration_last_refresh"] = ts
+        return attrs or None
+
+    def _compose_info(self) -> dict[str, Any] | None:
+        """Merge one-shot metadata with the latest counts from coordinator.data."""
+        base = dict(self.coordinator.meta) if self.coordinator.meta else {}
+        if not base:
+            return None
+        data = self.coordinator.data or {}
+        counts = data.get("counts") or {}
+        base["entity_count"] = counts.get("entity", base.get("entity_count"))
+        base["device_count"] = counts.get("device", base.get("device_count"))
+        base["integration_count"] = counts.get("integration", base.get("integration_count"))
+        return base
 
 
 @callback
