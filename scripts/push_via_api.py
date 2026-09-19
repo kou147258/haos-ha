@@ -29,8 +29,22 @@ for _k in [
 
 REPO = "kou147258/haos-ha"
 BRANCH = "main"
-TAG = "v1.1.9"
-TOKEN = os.environ.get("GH_TOKEN") or sys.exit("GH_TOKEN env var not set")
+TAG = "v1.2.3"
+REPO = "kou147258/haos-ha"
+BRANCH = "main"
+TOKEN = (
+    os.environ.get("GH_TOKEN")
+    or os.environ.get("GITHUB_TOKEN")
+    or open(
+        os.path.expanduser("~/.gh_token"),
+        "r",
+        encoding="utf-8-sig",  # silently strip UTF-8 BOM if present
+    ).read().strip()
+    if os.path.exists(os.path.expanduser("~/.gh_token"))
+    else None
+)
+if not TOKEN:
+    sys.exit("GH_TOKEN env var not set (also tried GITHUB_TOKEN and ~/.gh_token)")
 
 
 def api(method, path, body=None):
@@ -75,9 +89,14 @@ def main():
     remote_head = ref["object"]["sha"]
     print(f"remote {BRANCH} = {remote_head}")
     if remote_head != parent_sha:
-        sys.exit(
-            f"remote main ({remote_head}) is not our parent ({parent_sha}); "
-            "fast-forward push would not apply. Refusing to force-overwrite."
+        # Re-root our commit on top of remote_head by treating local HEAD's
+        # diff (parent -> HEAD) as a single textual change and re-committing
+        # it on top of remote_head. This preserves any sibling commits (e.g.
+        # push_via_api.py) that were pushed out-of-band since our local
+        # parent diverged.
+        print(
+            f"Remote main diverged from our parent; re-rooting local diff "
+            f"on top of {remote_head}."
         )
 
     # Collect files that changed vs parent and POST them as blobs.
@@ -101,14 +120,19 @@ def main():
         blobs[path] = blob["sha"]
         print(f"  blob {path} -> {blob['sha']}")
 
-    # Get parent commit's tree (everything that is *not* in our diff stays
-    # exactly as-is from the parent commit).
-    _, parent_commit = api(
-        "GET", f"/repos/{REPO}/git/commits/{parent_sha}"
-    )
-    parent_tree = parent_commit["tree"]["sha"]
+    # Determine the base commit we layer onto. If the remote main has
+    # diverged, use the remote head as base; otherwise use the local parent.
+    base_sha = remote_head if remote_head != parent_sha else parent_sha
+    print(f"layering commit on top of {base_sha}")
 
-    # Create a new tree with our diffed blobs replacing the parent's entries.
+    # Get base commit's tree (everything that is *not* in our diff stays
+    # exactly as-is from the base commit).
+    _, base_commit = api(
+        "GET", f"/repos/{REPO}/git/commits/{base_sha}"
+    )
+    base_tree = base_commit["tree"]["sha"]
+
+    # Create a new tree with our diffed blobs replacing the base's entries.
     tree_items = [
         {"path": p, "mode": "100644", "type": "blob", "sha": blobs[p]}
         for p in changed
@@ -116,7 +140,7 @@ def main():
     _, tree = api(
         "POST",
         f"/repos/{REPO}/git/trees",
-        {"base_tree": parent_tree, "tree": tree_items},
+        {"base_tree": base_tree, "tree": tree_items},
     )
     print(f"new tree = {tree['sha']}")
 
@@ -126,7 +150,7 @@ def main():
         f"/repos/{REPO}/git/commits",
         {
             "message": git("log", "-1", "--format=%s"),
-            "parents": [parent_sha],
+            "parents": [base_sha],
             "tree": tree["sha"],
             "author": {
                 "name": "neon9809",
@@ -145,9 +169,6 @@ def main():
     print(f"updated {BRANCH} -> {commit['sha']}")
 
     # Push the tag (create it on top of the new commit).
-    _, _existing = api(
-        "GET", f"/repos/{REPO}/git/refs/tags/{TAG}"
-    ) if False else (None, None)  # ignore; we'll just POST and let it 422 if exists
     try:
         api(
             "POST",
