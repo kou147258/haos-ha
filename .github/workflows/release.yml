@@ -13,11 +13,7 @@ on:
 
 permissions:
   contents: write
-  # packages: read is needed by `docker buildx imagetools create` in the
-  # manifest job — it pulls per-arch images before creating the
-  # multi-arch manifest. Without this scope, GITHUB_TOKEN rejects the
-  # pull with `insufficient_scope: authorization failed`.
-  packages: read
+  packages: write
 
 jobs:
   build-addon:
@@ -83,45 +79,13 @@ jobs:
           cache-to: type=gha,scope=addon-${{ matrix.arch }},mode=max
           provenance: false
 
-  manifest:
-    name: Build multi-arch manifest
-    needs: build-addon
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
-
-    steps:
-      - name: Checkout
-        # Need this to read haos_fb/config.yaml below. Without it, the
-        # runner has no working tree and Python can't open the file.
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create multi-arch manifest
-        run: |
-          VERSION=$(python -c "import yaml; print(yaml.safe_load(open('haos_fb/config.yaml'))['version'])")
-          OWNER="${{ github.repository_owner }}"
-          # Both source images and the resulting manifest need the `ghcr.io/`
-          # prefix. Without it, `docker buildx imagetools` defaults to Docker
-          # Hub, which fails with `insufficient_scope: authorization failed`
-          # because the GITHUB_TOKEN has no Docker Hub credentials.
-          docker buildx imagetools create \
-            --tag "ghcr.io/${OWNER}/haos-fb:${VERSION}" \
-            --tag "ghcr.io/${OWNER}/haos-fb:latest" \
-            "ghcr.io/${OWNER}/haos-fb-aarch64:${VERSION}" \
-            "ghcr.io/${OWNER}/haos-fb-amd64:${VERSION}" \
-            "ghcr.io/${OWNER}/haos-fb-armv7:${VERSION}" \
-            "ghcr.io/${OWNER}/haos-fb-armhf:${VERSION}" \
-            "ghcr.io/${OWNER}/haos-fb-i386:${VERSION}"
+  # Note: no multi-arch manifest step. Home Assistant Supervisor resolves
+  # the `{arch}` placeholder in the add-on's image: field at install time
+  # and pulls the matching per-arch image (ghcr.io/<owner>/haos-fb-{arch}).
+  # Creating an OCI manifest list would require the CI token to create a
+  # new top-level package, which the GITHUB_TOKEN (a GitHub App
+  # installation) can't do when the owner is a user account instead of an
+  # org: `denied: installation not allowed to Create organization package`.
 
   release:
     name: Create GitHub release
