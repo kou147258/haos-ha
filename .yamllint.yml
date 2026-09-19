@@ -2,6 +2,7 @@ extends: default
 rules:
   line-length: disable
   document-start: disable
+  new-line-at-end-of-file: disable
   truthy:
     allowed-values: ['true', 'false', 'on']
   indentation:
