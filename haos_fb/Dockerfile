@@ -1,5 +1,8 @@
-ARG BUILD_FROM
-FROM ${BUILD_FROM}
+# Multi-arch base image published by the Home Assistant add-ons project.
+# The :15.0.2 tag is a manifest list with linux/amd64, linux/arm64,
+# linux/arm/v7, linux/arm/v6, linux/386 variants — no per-arch build-arg
+# needed.
+FROM ghcr.io/hassio-addons/base:15.0.2
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \

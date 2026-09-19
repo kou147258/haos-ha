@@ -26,19 +26,14 @@ jobs:
         include:
           - arch: aarch64
             platform: linux/arm64
-            base-image: ghcr.io/hassio-addons/base/aarch64:15.0.2
           - arch: amd64
             platform: linux/amd64
-            base-image: ghcr.io/hassio-addons/base/amd64:15.0.2
           - arch: armv7
             platform: linux/arm/v7
-            base-image: ghcr.io/hassio-addons/base/armv7:15.0.2
           - arch: armhf
             platform: linux/arm/v6
-            base-image: ghcr.io/hassio-addons/base/armhf:15.0.2
           - arch: i386
             platform: linux/386
-            base-image: ghcr.io/hassio-addons/base/i386:15.0.2
 
     steps:
       - name: Checkout
@@ -74,9 +69,8 @@ jobs:
           context: ./haos_fb
           file: ./haos_fb/Dockerfile
           platforms: ${{ matrix.platform }}
-          # build-from forwards matrix.base-image as the BUILD_FROM arg that
-          # our Dockerfile's `FROM ${BUILD_FROM}` consumes.
-          build-from: ${{ matrix.base-image }}
+          # Dockerfile hardcodes a multi-arch base image (ghcr.io/hassio-addons/base:15.0.2)
+          # so no per-arch build-arg is needed.
           tags: |
             ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:${{ steps.version.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:latest
