@@ -1,0 +1,75 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HAOS Dashboard",
+        "description": "Monitor the host system (CPU, memory, disks, network, temperatures) and optionally render it to a connected display via the companion add-on.",
+        "data": {
+          "name": "Name"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one HAOS Dashboard instance is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HAOS Dashboard options",
+        "data": {
+          "refresh_interval": "Refresh interval (seconds)",
+          "temp_unit": "Temperature unit"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "display_running": {
+        "name": "Display running"
+      }
+    },
+    "sensor": {
+      "cpu_percent": {"name": "CPU Usage"},
+      "cpu_load_1": {"name": "CPU Load (1 min)"},
+      "cpu_freq": {"name": "CPU Frequency"},
+      "cpu_temp": {"name": "CPU Temperature"},
+      "cpu_core": {"name": "CPU Core {core}"},
+      "memory_percent": {"name": "Memory Usage"},
+      "memory_used": {"name": "Memory Used"},
+      "memory_total": {"name": "Memory Total"},
+      "memory_free": {"name": "Memory Available"},
+      "swap_percent": {"name": "Swap Usage"},
+      "swap_used": {"name": "Swap Used"},
+      "swap_total": {"name": "Swap Total"},
+      "net_up": {"name": "Network Upload"},
+      "net_down": {"name": "Network Download"},
+      "net_bytes_sent": {"name": "Network Bytes Sent"},
+      "net_bytes_recv": {"name": "Network Bytes Received"},
+      "uptime": {"name": "Uptime"},
+      "processes": {"name": "Processes"},
+      "hostname": {"name": "Hostname"},
+      "os": {"name": "Operating System"},
+      "disk_percent": {"name": "{mount} % Used"},
+      "disk_used": {"name": "{mount} Used"},
+      "disk_free": {"name": "{mount} Free"},
+      "disk_total": {"name": "{mount} Total"}
+    },
+    "switch": {
+      "display_enabled": {
+        "name": "Display enabled"
+      }
+    }
+  },
+  "services": {
+    "refresh_display": {
+      "name": "Refresh display",
+      "description": "Force the companion /dev/fb0 add-on to redraw immediately."
+    },
+    "reload_themes": {
+      "name": "Reload themes",
+      "description": "Reload integration options (refresh interval, temperature unit)."
+    }
+  }
+}

@@ -1,0 +1,13 @@
+refresh_display:
+  name: Refresh display
+  description: >-
+    Force the companion /dev/fb0 add-on to redraw immediately on its next
+    poll cycle. Useful when toggling themes or accent colors from the add-on
+    side and you don't want to wait for the next refresh.
+
+reload_themes:
+  name: Reload themes
+  description: >-
+    Reload the integration's options (refresh interval, temperature unit).
+    Provided for parity with the original haos command; in HA the
+    standard "Reload" UI action is equivalent.

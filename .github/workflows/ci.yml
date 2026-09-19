@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint & compile-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install linters
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet yamllint
+
+      - name: Compile-check Python
+        run: |
+          set -e
+          python -m compileall -q -j 0 custom_components/haos
+          python -m compileall -q -j 0 haos_fb
+          python -m compileall -q -j 0 dev.py tests
+
+      - name: Validate JSON
+        run: |
+          set -e
+          python - <<'PY'
+          import json, pathlib, sys
+          bad = []
+          for p in pathlib.Path('.').rglob('*.json'):
+              if any(part in ('node_modules', '.git', 'dist', 'build') for part in p.parts):
+                  continue
+              try:
+                  json.load(open(p, encoding='utf-8'))
+              except Exception as err:
+                  bad.append((p, err))
+          for p, err in bad:
+              print(f'  FAIL {p}: {err}')
+          if bad:
+              sys.exit(1)
+          print('OK — all JSON files valid')
+          PY
+
+      - name: Validate YAML
+        run: |
+          set -e
+          python - <<'PY'
+          import sys, yaml, pathlib
+          for p in list(pathlib.Path('haos_fb').glob('*.yaml')) + \
+                   list(pathlib.Path('.github').rglob('*.y*ml')) + \
+                   [pathlib.Path('.yamllint.yml')]:
+              try:
+                  yaml.safe_load(open(p, encoding='utf-8'))
+                  print('OK', p)
+              except Exception as err:
+                  print('FAIL', p, err)
+                  sys.exit(1)
+          PY
+
+      - name: YAML lint (yamllint)
+        run: yamllint .yamllint.yml haos_fb/ custom_components/haos/ .github/
+
+      - name: Check for placeholders
+        run: |
+          ! grep -RInE 'TODO|FIXME|XXX|<placeholder>|your-token' custom_components/haos haos_fb || (echo 'placeholders found in source'; exit 1)
+
+      - name: Verify add-on manifest essentials
+        run: |
+          python - <<'PY'
+          import sys, yaml
+          data = yaml.safe_load(open('haos_fb/config.yaml', encoding='utf-8'))
+          required = ['name', 'version', 'slug', 'arch', 'startup', 'boot', 'hassio_api', 'homeassistant_api']
+          missing = [k for k in required if k not in data]
+          if missing:
+              print(f'Missing add-on manifest keys: {missing}')
+              sys.exit(1)
+          if data['slug'] != 'haos_fb':
+              print(f"Unexpected slug: {data['slug']}")
+              sys.exit(1)
+          if 'python312' not in data.get('install_dep_apps', []):
+              print('Note: install_dep_apps missing — Python 3.12 must be installed manually')
+          print('OK')
+          PY
+
+  test:
+    name: Pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install test deps
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet 'psutil>=5.9.0,<7.0.0' pytest
+
+      - name: Run pytest
+        run: |
+          set -e
+          python -m pytest tests/ -v --tb=short --color=yes
+
+  integration-smoke:
+    name: Integration + addon smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install psutil (the only mandatory dep)
+        run: python -m pip install --quiet 'psutil>=5.9.0,<7.0.0'
+
+      - name: Verify integration files
+        run: |
+          set -e
+          test -f custom_components/haos/manifest.json
+          test -f custom_components/haos/__init__.py
+          test -f custom_components/haos/const.py
+          test -f custom_components/haos/coordinator.py
+          test -f custom_components/haos/sensor.py
+          test -f custom_components/haos/binary_sensor.py
+          test -f custom_components/haos/switch.py
+          test -f custom_components/haos/config_flow.py
+          test -f custom_components/haos/addon.py
+          test -f custom_components/haos/services.yaml
+          test -f custom_components/haos/strings.json
+          test -d custom_components/haos/translations
+          python -c "import json; m=json.load(open('custom_components/haos/manifest.json')); assert m['domain']=='haos'; print('manifest OK')"
+
+      - name: Render addon --dump-png (validates headless code path)
+        run: |
+          python -m pip install --quiet pillow
+          python haos_fb/fb_render.py \
+              --config haos_fb/options.example.json \
+              --dump-png /tmp/preview.png \
+              --width 320 --height 240 \
+              --synthetic
+          test -s /tmp/preview.png
+
+      - name: Render dev overview (stitch 3x2)
+        run: |
+          python dev.py --theme emerald --cell-width 240 --cell-height 160 \
+              --output /tmp/dev-overview.png
+          test -s /tmp/dev-overview.png

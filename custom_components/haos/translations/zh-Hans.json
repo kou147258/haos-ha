@@ -1,0 +1,75 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HAOS Dashboard",
+        "description": "监控宿主机（CPU / 内存 / 磁盘 / 网络 / 温度），并通过配套 add-on 将数据渲染到外接显示屏。",
+        "data": {
+          "name": "名称"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "只允许添加一个 HAOS Dashboard 实例。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HAOS Dashboard 选项",
+        "data": {
+          "refresh_interval": "刷新间隔（秒）",
+          "temp_unit": "温度单位"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "display_running": {
+        "name": "显示屏运行中"
+      }
+    },
+    "sensor": {
+      "cpu_percent": {"name": "CPU 使用率"},
+      "cpu_load_1": {"name": "CPU 负载（1 分钟）"},
+      "cpu_freq": {"name": "CPU 频率"},
+      "cpu_temp": {"name": "CPU 温度"},
+      "cpu_core": {"name": "CPU 核心 {core}"},
+      "memory_percent": {"name": "内存使用率"},
+      "memory_used": {"name": "内存已用"},
+      "memory_total": {"name": "内存总量"},
+      "memory_free": {"name": "内存可用"},
+      "swap_percent": {"name": "交换分区使用率"},
+      "swap_used": {"name": "交换分区已用"},
+      "swap_total": {"name": "交换分区总量"},
+      "net_up": {"name": "网络上行速率"},
+      "net_down": {"name": "网络下行速率"},
+      "net_bytes_sent": {"name": "网络累计发送"},
+      "net_bytes_recv": {"name": "网络累计接收"},
+      "uptime": {"name": "运行时长"},
+      "processes": {"name": "进程数"},
+      "hostname": {"name": "主机名"},
+      "os": {"name": "操作系统"},
+      "disk_percent": {"name": "{mount} 已用百分比"},
+      "disk_used": {"name": "{mount} 已用"},
+      "disk_free": {"name": "{mount} 可用"},
+      "disk_total": {"name": "{mount} 总容量"}
+    },
+    "switch": {
+      "display_enabled": {
+        "name": "启用显示屏"
+      }
+    }
+  },
+  "services": {
+    "refresh_display": {
+      "name": "刷新显示屏",
+      "description": "强制让配套 /dev/fb0 add-on 立即重绘。"
+    },
+    "reload_themes": {
+      "name": "重载主题",
+      "description": "重载集成选项（刷新间隔、温度单位）。"
+    }
+  }
+}

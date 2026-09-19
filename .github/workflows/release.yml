@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Skip pushing images / creating release (build only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-addon:
+    name: Build add-on (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            platform: linux/arm64
+          - arch: amd64
+            platform: linux/amd64
+          - arch: armv7
+            platform: linux/arm/v7
+          - arch: armhf
+            platform: linux/arm/v6
+          - arch: i386
+            platform: linux/386
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from add-on manifest
+        id: version
+        run: |
+          VERSION=$(python -c "import yaml; print(yaml.safe_load(open('haos_fb/config.yaml'))['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Addon version: $VERSION"
+
+      - name: Set up QEMU (for non-amd64 builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push) image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./haos_fb
+          file: ./haos_fb/Dockerfile
+          platforms: ${{ matrix.platform }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:latest
+          push: ${{ github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true' }}
+          cache-from: type=gha,scope=addon-${{ matrix.arch }}
+          cache-to: type=gha,scope=addon-${{ matrix.arch }},mode=max
+          provenance: false
+
+  manifest:
+    name: Build multi-arch manifest
+    needs: build-addon
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        run: |
+          VERSION=$(python -c "import yaml; print(yaml.safe_load(open('haos_fb/config.yaml'))['version'])")
+          OWNER="${{ github.repository_owner }}"
+          docker buildx imagetools create \
+            --tag "${OWNER}/haos-fb:${VERSION}" \
+            --tag "${OWNER}/haos-fb:latest" \
+            "${OWNER}/haos-fb-aarch64:${VERSION}" \
+            "${OWNER}/haos-fb-amd64:${VERSION}" \
+            "${OWNER}/haos-fb-armv7:${VERSION}" \
+            "${OWNER}/haos-fb-armhf:${VERSION}" \
+            "${OWNER}/haos-fb-i386:${VERSION}"
+
+  release:
+    name: Create GitHub release
+    needs: build-addon
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(python -c "import yaml; print(yaml.safe_load(open('haos_fb/config.yaml'))['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Package integration ZIP
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd custom_components
+          zip -r "../haos-${VERSION}.zip" haos
+
+      - name: Stage release notes
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## HAOS Dashboard Display add-on
+
+          Install via HA Supervisor → Add-on Store → ⋮ → Repositories →
+          paste this repo's URL.
+
+          ### Quick start
+
+          1. HACS → Custom repositories → add this repo → install
+             `haos` integration → restart HA.
+          2. HA → Add-ons → Add-on Store → install `HAOS Dashboard Display`.
+          3. Start the add-on. The `binary_sensor.haos_display_running`
+             will go `on` within ~2 s.
+
+          See the README for the full installation guide and per-architecture
+          multi-arch manifest.
+
+          ## Artifacts
+
+          - `haos-${VERSION}.zip` — drop-in HACS-compatible bundle
+            of the custom integration (no HACS install).
+          - ghcr.io multi-arch images — referenced automatically by the
+            add-on's `image:` field in `haos_fb/config.yaml`.
+
+          EOF
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
+          files: |
+            haos-${{ steps.version.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
