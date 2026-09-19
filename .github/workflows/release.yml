@@ -110,6 +110,12 @@ jobs:
           cd custom_components
           zip -r "../haos-${VERSION}.zip" haos
 
+      - name: Package add-on ZIP (for Supervisor local install)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd haos_fb
+          zip -r "../haos_fb-${VERSION}.zip" .
+
       - name: Stage release notes
         run: |
           cat > RELEASE_NOTES.md <<'EOF'
@@ -145,5 +151,6 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             haos-${{ steps.version.outputs.version }}.zip
+            haos_fb-${{ steps.version.outputs.version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

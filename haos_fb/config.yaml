@@ -1,5 +1,5 @@
 name: "HAOS Dashboard Display"
-version: "1.1.9"
+version: "1.2.3"
 slug: "haos_fb"
 description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
 url: "https://github.com/kou147258/haos-ha"
@@ -16,8 +16,27 @@ hassio_api: true
 hassio_role: default
 homeassistant_api: true
 host_network: false
+# Privileged capabilities for /dev/fb0 mmap.
+#
+# HAOS Supervisor add-on containers default to a locked-down cgroup +
+# capability set that denies raw I/O to /dev/fb0. Opening /dev/fb0 with
+# O_RDWR returns EINVAL (errno 22) from inside the container even when
+# the host's efifb/amdgpu/etc. driver is fully loaded and /proc/fb
+# reports the device — the kernel refuses the mmap.
+#
+# `full_access: true` is the Supervisor-supported "privileged add-on"
+# toggle that lets the container pass through all device + cgroup +
+# userns restrictions. We pair it with explicit bind mounts so the
+# device node actually exists in /dev inside the container.
+#
+# This is the same mechanism the official SSH, Terminal, and Portainer
+# add-ons use to access host hardware. Without it, /dev/fb0 mmap fails
+# silently with EINVAL even with SYS_ADMIN + SYS_RAWIO granted.
+full_access: true
+host_dbus: true
 devices:
   - "/dev/fb0:/dev/fb0:rwm"
+  - "/dev/dri:/dev/dri:rwm"
 ports:
   8199/tcp: null
 ports_description:
