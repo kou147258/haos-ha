@@ -97,9 +97,9 @@ async def async_setup_entry(
         )
     for index, disk in enumerate(data.get("disks", [])):
         entities.extend(_disk_sensors_for_mount(coordinator, entry, disk, index))
-    for temp in data.get("temperatures", []):
+    for temp_index, temp in enumerate(data.get("temperatures", [])):
         entities.append(
-            TemperatureSensor(coordinator, entry, temp, temp_unit_const)
+            TemperatureSensor(coordinator, entry, temp, temp_index, temp_unit_const)
         )
 
     async_add_entities(entities)
@@ -533,25 +533,35 @@ class DiskSensor(_BaseSensor):
 
 
 class TemperatureSensor(_BaseSensor):
-    """One sensor per psutil-detected temperature probe."""
+    """One sensor per psutil-detected temperature probe.
+
+    On some hosts (notably VMs) psutil returns multiple entries under the
+    same ``group`` with identical ``label`` strings (e.g. two ``acpitz``
+    entries from different thermal_zones). The unique_id therefore uses
+    ``(group, index)`` rather than ``(group, label)`` to stay unique, and
+    native_value / extra_state_attributes look up the n-th entry within
+    the matching group via the same index.
+    """
 
     def __init__(
         self,
         coordinator: FnOSDashboardCoordinator,
         entry: ConfigEntry,
         sensor: dict[str, Any],
+        index: int,
         temp_unit: str,
     ) -> None:
         super().__init__(coordinator, entry)
         self._label = sensor["label"]
         self._group = sensor["group"]
+        self._index = index
         self._attr_device_class = SensorDeviceClass.TEMPERATURE
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = temp_unit
         self._attr_suggested_display_precision = 1
         self._attr_unique_id = (
-            f"{entry.entry_id}_temp_{sensor['group']}_{sensor['label']}"
-        ).replace(" ", "_")
+            f"{entry.entry_id}_temp_{sensor['group']}_{index}"
+        )
         self._attr_translation_placeholders = {"label": sensor["label"]}
 
     @property
@@ -562,24 +572,35 @@ class TemperatureSensor(_BaseSensor):
     def native_value(self) -> Any:
         if self.coordinator.data is None:
             return None
-        for temp in self.coordinator.data.get("temperatures", []):
-            if temp["label"] == self._label and temp["group"] == self._group:
-                return temp["current"]
-        return None
+        # Same-group sensors are stored contiguously in the snapshot dict
+        # (see ``coordinator._collect_temperatures``). Index into that
+        # subset so two sensors with identical (group, label) values still
+        # resolve to distinct current readings.
+        same_group = [
+            t for t in self.coordinator.data.get("temperatures", [])
+            if t.get("group") == self._group
+        ]
+        if self._index >= len(same_group):
+            return None
+        return same_group[self._index].get("current")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if self.coordinator.data is None:
             return None
-        for temp in self.coordinator.data.get("temperatures", []):
-            if temp["label"] == self._label and temp["group"] == self._group:
-                attrs: dict[str, Any] = {"group": temp["group"]}
-                if temp.get("high") is not None:
-                    attrs["high"] = temp["high"]
-                if temp.get("critical") is not None:
-                    attrs["critical"] = temp["critical"]
-                return attrs
-        return None
+        same_group = [
+            t for t in self.coordinator.data.get("temperatures", [])
+            if t.get("group") == self._group
+        ]
+        if self._index >= len(same_group):
+            return None
+        sensor = same_group[self._index]
+        attrs: dict[str, Any] = {"group": sensor["group"]}
+        if sensor.get("high") is not None:
+            attrs["high"] = sensor["high"]
+        if sensor.get("critical") is not None:
+            attrs["critical"] = sensor["critical"]
+        return attrs
 
 
 class InfoSensor(_BaseSensor):

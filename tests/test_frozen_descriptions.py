@@ -99,9 +99,44 @@ def test_temperature_sensor_does_not_mutate_description(mock_snapshot):
         coordinator=MagicMock(data=mock_snapshot),
         entry=_make_entry(),
         sensor=mock_snapshot["temperatures"][0],
+        index=0,
         temp_unit="C",
     )
     assert sensor.native_value == pytest.approx(55.0)
+
+
+def test_temperature_sensor_unique_id_with_duplicate_labels():
+    """Regression: real hosts (especially VMs) can have multiple temperature
+    sensors under the same group with identical label strings. The unique_id
+    must use (group, index) so they don't collide."""
+    from custom_components.haos.sensor import TemperatureSensor
+    snapshot = {
+        "temperatures": [
+            {"label": "acpitz", "group": "acpitz", "current": 27.8},
+            {"label": "acpitz", "group": "acpitz", "current": 29.0},
+            {"label": "acpitz", "group": "acpitz", "current": 30.5},
+        ],
+    }
+    coordinator = MagicMock(data=snapshot)
+    entry = MagicMock()
+    entry.entry_id = "01M2W83KX897NJ7XQK58EQVPJA"
+    entry.title = "Test"
+    sensors = [
+        TemperatureSensor(
+            coordinator=coordinator, entry=entry,
+            sensor=snapshot["temperatures"][i],
+            index=i, temp_unit="C",
+        )
+        for i in range(3)
+    ]
+    unique_ids = {s._attr_unique_id for s in sensors}
+    # All three must produce distinct unique_ids even though every
+    # (group, label) pair is identical.
+    assert len(unique_ids) == 3, f"unique_ids collide: {unique_ids}"
+    # Each must still resolve to its own current value, not the first one.
+    assert sensors[0].native_value == pytest.approx(27.8)
+    assert sensors[1].native_value == pytest.approx(29.0)
+    assert sensors[2].native_value == pytest.approx(30.5)
 
 
 def test_static_sensor_does_not_mutate_description():

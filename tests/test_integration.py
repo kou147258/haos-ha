@@ -153,6 +153,7 @@ def test_temperature_value_extractor(mock_snapshot):
         coordinator=MagicMock(data=mock_snapshot),
         entry=entry,
         sensor=mock_snapshot["temperatures"][0],
+        index=0,
         temp_unit="C",
     )
     assert sensor.native_value == pytest.approx(55.0)
