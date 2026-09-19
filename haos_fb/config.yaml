@@ -1,5 +1,5 @@
 name: "HAOS Dashboard Display"
-version: "1.1.7"
+version: "1.1.8"
 slug: "haos_fb"
 description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
 url: "https://github.com/kou147258/haos-ha"
@@ -40,12 +40,17 @@ options:
     - disks
     - info
 schema:
-  theme: "match(midnight|graphite|emerald|sunshine|cherry|cloud)"
+  theme: "list(midnight|graphite|emerald|sunshine|cherry|cloud)"
   accent: "str?"
   refresh: "int(1,30)"
-  temp_unit: "match(C|F)"
-  rotate: "match(0|90|180|270)"
+  temp_unit: "list(C|F)"
+  rotate: "list(0|90|180|270)"
   screen_inches: "float(0,100)"
   page_interval: "int(0,300)"
-  pages: "list(match(status|cpu|memory|network|disks|info))"
+  # `pages` is a list-typed option, so its schema is a YAML list of one
+  # item-schema string. Supervisor applies that schema per element.
+  # (Using a bare string here makes Supervisor treat the whole list as a
+  # single enum value and reject it with "value must be one of [...]".)
+  pages:
+    - "list(status|cpu|memory|network|disks|info)"
 image: "ghcr.io/kou147258/haos-fb-{arch}"
