@@ -108,11 +108,15 @@ class FnOSDashboardSensorDescription(SensorEntityDescription):
     Plain subclass (not @dataclass) so we can accept the full HA
     SensorEntityDescription kwargs plus our own ``value_fn`` regardless of
     whether the test suite has stubbed out the HA dataclass.
+
+    Uses ``object.__setattr__`` for ``value_fn`` so the frozen-style guard
+    on the parent class (HA 2026+ makes SensorEntityDescription immutable)
+    doesn't block this one extension field.
     """
 
     def __init__(self, value_fn: Callable[[dict[str, Any]], Any], **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.value_fn = value_fn
+        object.__setattr__(self, "value_fn", value_fn)
 
 
 _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
@@ -506,10 +510,6 @@ class DiskSensor(_BaseSensor):
         self._attr_unique_id = f"{entry.entry_id}_disk_{safe_mount}_{metric}"
         self._attr_translation_placeholders = {"mount": disk["mount"]}
         self._attr_name = label_suffix
-        # Bind this disk mount into the value_fn closure.
-        self.entity_description.value_fn = (
-            lambda d, m=self._disk_mount, key=self._metric: _disk_value(d, m, key)
-        )
 
     @property
     def native_value(self) -> Any:
@@ -578,11 +578,23 @@ class InfoSensor(_BaseSensor):
     every other field lands in ``extra_state_attributes``. Counts refresh with
     the coordinator's main tick; everything else is captured once at setup
     and stays put until the integration reloads.
+
+    Uses the standard ``entity_description`` pattern (name + translation_key
+    on the description class attribute) so HA's metaclass-managed
+    ``@cached_property`` machinery for ``name`` / ``icon`` / ``translation_key``
+    picks everything up automatically -- no need to override those properties
+    on the entity subclass.
     """
 
-    _attr_icon = "mdi:information-outline"
+    entity_description = FnOSDashboardSensorDescription(
+        key="info",
+        translation_key="info",
+        name="Info",
+        icon="mdi:information-outline",
+        value_fn=None,  # native_value is overridden; value_fn is unused
+    )
     # Deliberately NOT setting device_class / state_class / unit: this is a
-    # text summary, not a measurement.
+    # text summary, not a measurement, so HA's numeric-state path short-circuits.
 
     def __init__(
         self,
@@ -591,11 +603,6 @@ class InfoSensor(_BaseSensor):
     ) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_info"
-        self._attr_translation_key = "info"
-
-    @property
-    def name(self) -> str | None:
-        return "Info"
 
     @property
     def native_value(self) -> str | None:

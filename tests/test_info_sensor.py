@@ -131,7 +131,10 @@ def test_info_sensor_translation_key_for_frontend():
     sensor = InfoSensor(coordinator=_make_coordinator({"ha_core_version": "1"}),
                         entry=_make_entry())
 
-    assert sensor._attr_translation_key == "info"
+    # Translation key now lives on the class-level entity_description
+    # rather than on _attr_translation_key -- HA's cached_property machinery
+    # picks it up from there.
+    assert sensor.entity_description.translation_key == "info"
 
 
 def test_info_sensor_does_not_set_state_class():

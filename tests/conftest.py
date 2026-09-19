@@ -282,11 +282,12 @@ def _install_ha_stubs() -> None:
         TOTAL_INCREASING = "total_increasing"
 
     class SensorEntityDescription:
-        """Stub matching HA's @dataclass SensorEntityDescription shape.
+        """Stub matching HA's frozen dataclass SensorEntityDescription.
 
-        The integration subclasses this with another @dataclass that adds
-        ``value_fn``; the subclass's generated ``__init__`` calls ours with
-        ``**kwargs``, so we just stash everything.
+        Real HA 2026+ uses ``@dataclass(frozen=True)`` -- attempting to set
+        an attribute on an instance raises ``FrozenInstanceError``. We mirror
+        that here so any test that mutates ``entity_description.<anything>``
+        breaks loud, matching production behaviour.
         """
 
         key: str | None = None
@@ -302,14 +303,30 @@ def _install_ha_stubs() -> None:
                      icon=None, device_class=None, state_class=None,
                      native_unit_of_measurement=None,
                      suggested_display_precision=None, **_extra):
-            self.key = key
-            self.translation_key = translation_key
-            self.name = name
-            self.icon = icon
-            self.device_class = device_class
-            self.state_class = state_class
-            self.native_unit_of_measurement = native_unit_of_measurement
-            self.suggested_display_precision = suggested_display_precision
+            # Use object.__setattr__ so __setattr__'s frozen guard doesn't
+            # block initial field assignment (mirrors @dataclass(frozen=True)
+            # which uses object.__setattr__ internally).
+            object.__setattr__(self, "key", key)
+            object.__setattr__(self, "translation_key", translation_key)
+            object.__setattr__(self, "name", name)
+            object.__setattr__(self, "icon", icon)
+            object.__setattr__(self, "device_class", device_class)
+            object.__setattr__(self, "state_class", state_class)
+            object.__setattr__(self, "native_unit_of_measurement", native_unit_of_measurement)
+            object.__setattr__(self, "suggested_display_precision", suggested_display_precision)
+
+        def __setattr__(self, name, value):
+            if name in (
+                "key", "translation_key", "name", "icon", "device_class",
+                "state_class", "native_unit_of_measurement",
+                "suggested_display_precision", "value_fn",
+            ):
+                raise AttributeError(
+                    f"cannot assign to field '{name}' -- SensorEntityDescription "
+                    "is frozen in HA 2026+; do not mutate entity_description "
+                    "instances at runtime."
+                )
+            super().__setattr__(name, value)
 
     class SensorEntity:
         _attr_has_entity_name = False
