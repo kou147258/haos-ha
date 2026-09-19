@@ -1,5 +1,5 @@
 name: "HAOS Dashboard Display"
-version: "1.1.9"
+version: "1.2.0"
 slug: "haos_fb"
 description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
 url: "https://github.com/kou147258/haos-ha"
@@ -16,8 +16,26 @@ hassio_api: true
 hassio_role: default
 homeassistant_api: true
 host_network: false
+# Privileged capabilities for /dev/fb0 mmap.
+#
+# HAOS Supervisor add-on containers default to a locked-down cgroup +
+# capability set that denies raw I/O to /dev/fb0. Opening /dev/fb0 with
+# O_RDWR returns EINVAL (errno 22) from inside the container even when
+# the host's efifb/amdgpu/etc. driver is fully loaded and /proc/fb
+# reports the device — the kernel refuses the mmap.
+#
+# Granting SYS_ADMIN + SYS_RAWIO plus a passthrough of /dev/dri lets the
+# renderer write to the actual framebuffer device, not just the headless
+# PNG fallback. /dev/dri is needed for the modern KMS/DRM path that
+# amdgpu/nouveau/i915 expose via /dev/fb0; without it some kernel
+# builds refuse to bind the fb device to a renderer in userns.
+privileged:
+  - SYS_ADMIN
+  - SYS_RAWIO
+host_dbus: true
 devices:
   - "/dev/fb0:/dev/fb0:rwm"
+  - "/dev/dri:/dev/dri:rwm"
 ports:
   8199/tcp: null
 ports_description:
