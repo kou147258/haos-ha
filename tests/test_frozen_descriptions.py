@@ -18,9 +18,9 @@ import pytest
 
 from custom_components.haos.sensor import (
     DiskSensor,
-    FnOSDashboardSensorDescription,
     InfoSensor,
     PerCoreCpuSensor,
+    SensorEntityDescription,
     StaticSensor,
     TemperatureSensor,
     _STATIC_DESCRIPTIONS,
@@ -43,13 +43,10 @@ def _make_entry():
     ("state_class", "hacked"),
     ("native_unit_of_measurement", "hacked"),
     ("suggested_display_precision", 99),
-    ("value_fn", lambda d: None),
 ])
 def test_sensor_entity_description_is_frozen(field, value):
     """The stub raises on any field assignment, matching real HA 2026+."""
-    desc = FnOSDashboardSensorDescription(
-        value_fn=lambda d: None, key="orig", name="orig",
-    )
+    desc = SensorEntityDescription(key="orig", name="orig")
     with pytest.raises(AttributeError, match="frozen"):
         setattr(desc, field, value)
 
@@ -111,7 +108,7 @@ def test_static_sensor_does_not_mutate_description():
     sensor = StaticSensor(
         coordinator=MagicMock(data={"cpu": {"percent": 42.5}}),
         entry=_make_entry(),
-        description=_STATIC_DESCRIPTIONS["cpu_percent"],
+        description_key="cpu_percent",
     )
     assert sensor.native_value == pytest.approx(42.5)
 

@@ -8,11 +8,19 @@ Exposes the coordinator snapshot as a tree of sensor entities:
   - Network up / down rate and totals
   - One sensor per detected temperature probe
   - System info: uptime, processes, hostname, OS
+  - Info sensor summarising HA / Supervisor / HAOS / add-on metadata
+
+Design note: ``SensorEntityDescription`` is a frozen dataclass in HA 2026+
+(``FrozenOrThawed`` metaclass in ``frozen_dataclass_compat.py`` -- it routes
+all kwargs through the underlying frozen ``_dataclass.__init__`` and rejects
+unknown fields with ``TypeError``). We therefore do NOT subclass it to add
+custom fields; value extractors live in ``_VALUE_FNS`` (below) keyed by
+``description.key``, and entity instances look up the extractor at native_value
+time.
 """
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -52,25 +60,25 @@ async def async_setup_entry(
         temp_unit = DEFAULT_TEMP_UNIT
 
     entities: list[SensorEntity] = [
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["cpu_percent"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["cpu_load_1"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["cpu_freq"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["cpu_temp"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["memory_percent"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["memory_used"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["memory_total"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["memory_free"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["swap_percent"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["swap_used"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["swap_total"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["net_up"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["net_down"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["net_bytes_sent"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["net_bytes_recv"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["uptime"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["processes"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["hostname"]),
-        StaticSensor(coordinator, entry, _STATIC_DESCRIPTIONS["os"]),
+        StaticSensor(coordinator, entry, "cpu_percent"),
+        StaticSensor(coordinator, entry, "cpu_load_1"),
+        StaticSensor(coordinator, entry, "cpu_freq"),
+        StaticSensor(coordinator, entry, "cpu_temp"),
+        StaticSensor(coordinator, entry, "memory_percent"),
+        StaticSensor(coordinator, entry, "memory_used"),
+        StaticSensor(coordinator, entry, "memory_total"),
+        StaticSensor(coordinator, entry, "memory_free"),
+        StaticSensor(coordinator, entry, "swap_percent"),
+        StaticSensor(coordinator, entry, "swap_used"),
+        StaticSensor(coordinator, entry, "swap_total"),
+        StaticSensor(coordinator, entry, "net_up"),
+        StaticSensor(coordinator, entry, "net_down"),
+        StaticSensor(coordinator, entry, "net_bytes_sent"),
+        StaticSensor(coordinator, entry, "net_bytes_recv"),
+        StaticSensor(coordinator, entry, "uptime"),
+        StaticSensor(coordinator, entry, "processes"),
+        StaticSensor(coordinator, entry, "hostname"),
+        StaticSensor(coordinator, entry, "os"),
     ]
     temp_unit_const = (
         UnitOfTemperature.CELSIUS if temp_unit == "C" else UnitOfTemperature.FAHRENHEIT
@@ -98,29 +106,54 @@ async def async_setup_entry(
 
 
 # ---------------------------------------------------------------------------
-# Descriptions
+# Value extractors -- separate from descriptions
+# ---------------------------------------------------------------------------
+#
+# In HA 2026+ ``SensorEntityDescription`` is a frozen dataclass. Subclassing
+# it to add a ``value_fn`` field blows up at construction time (TypeError:
+# unexpected keyword argument 'value_fn'). Instead we keep extractors in a
+# plain dict keyed by ``description.key`` and look them up on the entity.
+#
+# The dict is module-level so it doesn't allocate per entity instance.
+
+_VALUE_FNS: dict[str, Callable[[dict[str, Any]], Any]] = {
+    "cpu_percent": lambda d: d.get("cpu", {}).get("percent"),
+    "cpu_load_1": lambda d: (d.get("cpu", {}).get("load") or [None])[0],
+    "cpu_freq": lambda d: d.get("cpu", {}).get("freq_mhz"),
+    "cpu_temp": lambda d: d.get("cpu", {}).get("temp"),
+    "memory_percent": lambda d: d.get("memory", {}).get("percent"),
+    "memory_used": lambda d: d.get("memory", {}).get("used"),
+    "memory_total": lambda d: d.get("memory", {}).get("total"),
+    "memory_free": lambda d: d.get("memory", {}).get("free"),
+    "swap_percent": lambda d: d.get("memory", {}).get("swap_percent"),
+    "swap_used": lambda d: d.get("memory", {}).get("swap_used"),
+    "swap_total": lambda d: d.get("memory", {}).get("swap_total"),
+    "net_up": lambda d: d.get("network", {}).get("up_kbps"),
+    "net_down": lambda d: d.get("network", {}).get("down_kbps"),
+    "net_bytes_sent": lambda d: d.get("network", {}).get("bytes_sent"),
+    "net_bytes_recv": lambda d: d.get("network", {}).get("bytes_recv"),
+    "uptime": lambda d: d.get("uptime_seconds"),
+    "processes": lambda d: d.get("processes"),
+    "hostname": lambda d: d.get("hostname"),
+    "os": lambda d: d.get("os"),
+}
+
+
+def _disk_value(data: dict[str, Any], mount: str, key: str) -> Any:
+    """Look up the value of a disk metric for a given mount."""
+    for disk in data.get("disks", []):
+        if disk.get("mount") == mount:
+            return disk.get(key)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Descriptions (plain SensorEntityDescription, no custom fields)
 # ---------------------------------------------------------------------------
 
 
-class FnOSDashboardSensorDescription(SensorEntityDescription):
-    """Sensor description with a value extractor.
-
-    Plain subclass (not @dataclass) so we can accept the full HA
-    SensorEntityDescription kwargs plus our own ``value_fn`` regardless of
-    whether the test suite has stubbed out the HA dataclass.
-
-    Uses ``object.__setattr__`` for ``value_fn`` so the frozen-style guard
-    on the parent class (HA 2026+ makes SensorEntityDescription immutable)
-    doesn't block this one extension field.
-    """
-
-    def __init__(self, value_fn: Callable[[dict[str, Any]], Any], **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        object.__setattr__(self, "value_fn", value_fn)
-
-
-_STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
-    "cpu_percent": FnOSDashboardSensorDescription(
+_STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
+    "cpu_percent": SensorEntityDescription(
         key="cpu_percent",
         translation_key="cpu_percent",
         name="CPU Usage",
@@ -128,9 +161,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=1,
-        value_fn=lambda d: d.get("cpu", {}).get("percent"),
     ),
-    "cpu_load_1": FnOSDashboardSensorDescription(
+    "cpu_load_1": SensorEntityDescription(
         key="cpu_load_1",
         translation_key="cpu_load_1",
         name="CPU Load (1 min)",
@@ -138,9 +170,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=2,
-        value_fn=lambda d: (d.get("cpu", {}).get("load") or [None])[0],
     ),
-    "cpu_freq": FnOSDashboardSensorDescription(
+    "cpu_freq": SensorEntityDescription(
         key="cpu_freq",
         translation_key="cpu_freq",
         name="CPU Frequency",
@@ -149,9 +180,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfFrequency.MEGAHERTZ,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("cpu", {}).get("freq_mhz"),
     ),
-    "cpu_temp": FnOSDashboardSensorDescription(
+    "cpu_temp": SensorEntityDescription(
         key="cpu_temp",
         translation_key="cpu_temp",
         name="CPU Temperature",
@@ -160,9 +190,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         suggested_display_precision=1,
-        value_fn=lambda d: d.get("cpu", {}).get("temp"),
     ),
-    "memory_percent": FnOSDashboardSensorDescription(
+    "memory_percent": SensorEntityDescription(
         key="memory_percent",
         translation_key="memory_percent",
         name="Memory Usage",
@@ -170,9 +199,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=1,
-        value_fn=lambda d: d.get("memory", {}).get("percent"),
     ),
-    "memory_used": FnOSDashboardSensorDescription(
+    "memory_used": SensorEntityDescription(
         key="memory_used",
         translation_key="memory_used",
         name="Memory Used",
@@ -181,9 +209,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfInformation.BYTES,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("memory", {}).get("used"),
     ),
-    "memory_total": FnOSDashboardSensorDescription(
+    "memory_total": SensorEntityDescription(
         key="memory_total",
         translation_key="memory_total",
         name="Memory Total",
@@ -192,9 +219,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfInformation.BYTES,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("memory", {}).get("total"),
     ),
-    "memory_free": FnOSDashboardSensorDescription(
+    "memory_free": SensorEntityDescription(
         key="memory_free",
         translation_key="memory_free",
         name="Memory Available",
@@ -203,9 +229,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfInformation.BYTES,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("memory", {}).get("free"),
     ),
-    "swap_percent": FnOSDashboardSensorDescription(
+    "swap_percent": SensorEntityDescription(
         key="swap_percent",
         translation_key="swap_percent",
         name="Swap Usage",
@@ -213,9 +238,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=1,
-        value_fn=lambda d: d.get("memory", {}).get("swap_percent"),
     ),
-    "swap_used": FnOSDashboardSensorDescription(
+    "swap_used": SensorEntityDescription(
         key="swap_used",
         translation_key="swap_used",
         name="Swap Used",
@@ -224,9 +248,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfInformation.BYTES,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("memory", {}).get("swap_used"),
     ),
-    "swap_total": FnOSDashboardSensorDescription(
+    "swap_total": SensorEntityDescription(
         key="swap_total",
         translation_key="swap_total",
         name="Swap Total",
@@ -235,9 +258,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfInformation.BYTES,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("memory", {}).get("swap_total"),
     ),
-    "net_up": FnOSDashboardSensorDescription(
+    "net_up": SensorEntityDescription(
         key="net_up",
         translation_key="net_up",
         name="Network Upload",
@@ -246,9 +268,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfDataRate.KILOBYTES_PER_SECOND,
         suggested_display_precision=1,
-        value_fn=lambda d: d.get("network", {}).get("up_kbps"),
     ),
-    "net_down": FnOSDashboardSensorDescription(
+    "net_down": SensorEntityDescription(
         key="net_down",
         translation_key="net_down",
         name="Network Download",
@@ -257,9 +278,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfDataRate.KILOBYTES_PER_SECOND,
         suggested_display_precision=1,
-        value_fn=lambda d: d.get("network", {}).get("down_kbps"),
     ),
-    "net_bytes_sent": FnOSDashboardSensorDescription(
+    "net_bytes_sent": SensorEntityDescription(
         key="net_bytes_sent",
         translation_key="net_bytes_sent",
         name="Network Bytes Sent",
@@ -268,9 +288,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfInformation.BYTES,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("network", {}).get("bytes_sent"),
     ),
-    "net_bytes_recv": FnOSDashboardSensorDescription(
+    "net_bytes_recv": SensorEntityDescription(
         key="net_bytes_recv",
         translation_key="net_bytes_recv",
         name="Network Bytes Received",
@@ -279,9 +298,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfInformation.BYTES,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("network", {}).get("bytes_recv"),
     ),
-    "uptime": FnOSDashboardSensorDescription(
+    "uptime": SensorEntityDescription(
         key="uptime",
         translation_key="uptime",
         name="Uptime",
@@ -290,9 +308,8 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfTime.SECONDS,
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("uptime_seconds"),
     ),
-    "processes": FnOSDashboardSensorDescription(
+    "processes": SensorEntityDescription(
         key="processes",
         translation_key="processes",
         name="Processes",
@@ -300,21 +317,18 @@ _STATIC_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="processes",
         suggested_display_precision=0,
-        value_fn=lambda d: d.get("processes"),
     ),
-    "hostname": FnOSDashboardSensorDescription(
+    "hostname": SensorEntityDescription(
         key="hostname",
         translation_key="hostname",
         name="Hostname",
         icon="mdi:server",
-        value_fn=lambda d: d.get("hostname"),
     ),
-    "os": FnOSDashboardSensorDescription(
+    "os": SensorEntityDescription(
         key="os",
         translation_key="os",
         name="Operating System",
         icon="mdi:linux",
-        value_fn=lambda d: d.get("os"),
     ),
 }
 
@@ -367,7 +381,7 @@ class _BaseSensor(CoordinatorEntity[FnOSDashboardCoordinator], SensorEntity):
     """Base class shared by every HAOS Dashboard sensor."""
 
     _attr_has_entity_name = True
-    entity_description: FnOSDashboardSensorDescription
+    entity_description: SensorEntityDescription
 
     def __init__(
         self,
@@ -384,31 +398,32 @@ class _BaseSensor(CoordinatorEntity[FnOSDashboardCoordinator], SensorEntity):
 
 
 class StaticSensor(_BaseSensor):
-    """Sensor backed by a static description + value_fn."""
+    """Sensor backed by a static description + the matching ``_VALUE_FNS`` extractor."""
 
-    entity_description: FnOSDashboardSensorDescription
+    entity_description: SensorEntityDescription
 
     def __init__(
         self,
         coordinator: FnOSDashboardCoordinator,
         entry: ConfigEntry,
-        description: FnOSDashboardSensorDescription,
+        description_key: str,
     ) -> None:
         super().__init__(coordinator, entry)
-        self.entity_description = description
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        self.entity_description = _STATIC_DESCRIPTIONS[description_key]
+        self._value_fn = _VALUE_FNS[description_key]
+        self._attr_unique_id = f"{entry.entry_id}_{description_key}"
 
     @property
     def native_value(self) -> Any:
         if self.coordinator.data is None:
             return None
-        return self.entity_description.value_fn(self.coordinator.data)
+        return self._value_fn(self.coordinator.data)
 
 
 class PerCoreCpuSensor(_BaseSensor):
     """One sensor per logical CPU core."""
 
-    entity_description = FnOSDashboardSensorDescription(
+    entity_description = SensorEntityDescription(
         key="cpu_core",
         translation_key="cpu_core",
         name="CPU Core",
@@ -416,7 +431,6 @@ class PerCoreCpuSensor(_BaseSensor):
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=1,
-        value_fn=lambda d, idx=0: (d.get("cpu", {}).get("per_core") or [None])[idx],
     )
 
     def __init__(
@@ -448,8 +462,8 @@ class PerCoreCpuSensor(_BaseSensor):
 class DiskSensor(_BaseSensor):
     """Disk metric (percent / used / free / total) for a single mount."""
 
-    _DISK_DESCRIPTIONS: dict[str, FnOSDashboardSensorDescription] = {
-        "percent": FnOSDashboardSensorDescription(
+    _DISK_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
+        "percent": SensorEntityDescription(
             key="disk_percent",
             translation_key="disk_percent",
             name="% Used",
@@ -457,9 +471,8 @@ class DiskSensor(_BaseSensor):
             state_class=SensorStateClass.MEASUREMENT,
             native_unit_of_measurement=PERCENTAGE,
             suggested_display_precision=1,
-            value_fn=lambda d, mount="": _disk_value(d, mount, "percent"),
         ),
-        "used": FnOSDashboardSensorDescription(
+        "used": SensorEntityDescription(
             key="disk_used",
             translation_key="disk_used",
             name="Used",
@@ -468,9 +481,8 @@ class DiskSensor(_BaseSensor):
             state_class=SensorStateClass.MEASUREMENT,
             native_unit_of_measurement=UnitOfInformation.BYTES,
             suggested_display_precision=0,
-            value_fn=lambda d, mount="": _disk_value(d, mount, "used"),
         ),
-        "free": FnOSDashboardSensorDescription(
+        "free": SensorEntityDescription(
             key="disk_free",
             translation_key="disk_free",
             name="Free",
@@ -479,9 +491,8 @@ class DiskSensor(_BaseSensor):
             state_class=SensorStateClass.MEASUREMENT,
             native_unit_of_measurement=UnitOfInformation.BYTES,
             suggested_display_precision=0,
-            value_fn=lambda d, mount="": _disk_value(d, mount, "free"),
         ),
-        "total": FnOSDashboardSensorDescription(
+        "total": SensorEntityDescription(
             key="disk_total",
             translation_key="disk_total",
             name="Total",
@@ -490,7 +501,6 @@ class DiskSensor(_BaseSensor):
             state_class=SensorStateClass.MEASUREMENT,
             native_unit_of_measurement=UnitOfInformation.BYTES,
             suggested_display_precision=0,
-            value_fn=lambda d, mount="": _disk_value(d, mount, "total"),
         ),
     }
 
@@ -507,6 +517,10 @@ class DiskSensor(_BaseSensor):
         self._disk_mount = disk["mount"]
         self._metric = metric
         self.entity_description = self._DISK_DESCRIPTIONS[metric]
+        # Bind mount + metric into a closure for the value extractor.
+        self._value_fn = (
+            lambda d, m=self._disk_mount, k=self._metric: _disk_value(d, m, k)
+        )
         self._attr_unique_id = f"{entry.entry_id}_disk_{safe_mount}_{metric}"
         self._attr_translation_placeholders = {"mount": disk["mount"]}
         self._attr_name = label_suffix
@@ -515,10 +529,7 @@ class DiskSensor(_BaseSensor):
     def native_value(self) -> Any:
         if self.coordinator.data is None:
             return None
-        for disk in self.coordinator.data.get("disks", []):
-            if disk["mount"] == self._disk_mount:
-                return disk.get(self._metric)
-        return None
+        return self._value_fn(self.coordinator.data)
 
 
 class TemperatureSensor(_BaseSensor):
@@ -586,12 +597,11 @@ class InfoSensor(_BaseSensor):
     on the entity subclass.
     """
 
-    entity_description = FnOSDashboardSensorDescription(
+    entity_description = SensorEntityDescription(
         key="info",
         translation_key="info",
         name="Info",
         icon="mdi:information-outline",
-        value_fn=None,  # native_value is overridden; value_fn is unused
     )
     # Deliberately NOT setting device_class / state_class / unit: this is a
     # text summary, not a measurement, so HA's numeric-state path short-circuits.

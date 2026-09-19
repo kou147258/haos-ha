@@ -92,10 +92,11 @@ def test_coordinator_first_refresh_failure_raises_updatefailed():
 
 def test_static_descriptions_all_return_value(mock_snapshot):
     """Every static description's value_fn should extract something sensible."""
-    from custom_components.haos.sensor import _STATIC_DESCRIPTIONS
+    from custom_components.haos.sensor import _STATIC_DESCRIPTIONS, _VALUE_FNS
 
     for key, desc in _STATIC_DESCRIPTIONS.items():
-        value = desc.value_fn(mock_snapshot)
+        assert key in _VALUE_FNS, f"missing value extractor for {key}"
+        value = _VALUE_FNS[key](mock_snapshot)
         # All extractors should at least not crash. Some return None when the
         # underlying field is genuinely absent (e.g. cpu_temp on hosts with
         # no /sys/class/thermal entries); we just verify the extractor ran.
