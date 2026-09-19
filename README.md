@@ -3,6 +3,183 @@
 Generic-Linux system monitor + `/dev/fb0` display renderer, repackaged as a
 **HA custom integration** (HACS) and a **HA Supervisor add-on**.
 
+
+
+<details>
+<summary><strong>📖 Language / 语言 — 点击展开中文 / Click to expand Chinese</strong></summary>
+
+
+通用 Linux 系统监控 + `/dev/fb0` 显示器渲染器，打包成 **HA 自定义集成**（HACS）+ **HA Supervisor 插件**（仅 HAOS 用）。
+
+源自 [neon9809/haos](https://github.com/neon9809/haos)，去掉了 fnOS 特有的 FPK 打包 / udev 规则 / CGI 网关 / `/vol*` 探测 / `.neon-dash` 模块系统，**只保留**两件事：
+
+1. **系统监控** — CPU / 内存 / Swap / 磁盘 / 网络 / 温度 / 启动时间 / 进程数 / 主机名 / OS
+2. **显示器模式** — 把这些数据实时画到 `/dev/fb0`（HAOS 专用，走 Supervisor 插件）
+
+### 要求
+
+- **Home Assistant 2026.8 或更高**（用了 `async_get_system_info` + HA 2026.8 引入的 frozen `SensorEntityDescription` + `FrozenOrThawed` metaclass）
+- 显示器模式只在 **HAOS / Supervised** 可用（需要 Supervisor）；Container / Core 部署只能装集成
+
+### 装集成 `haos`（2 选 1）
+
+**方法 A：HACS Custom Repository（推荐）**
+
+1. HA → **HACS** → **Integrations** → 右上 ⋮ → **Custom repositories**
+2. Repository 填 `https://github.com/kou147258/haos-ha`，Category 选 `Integration`，点 **Add**
+3. 回到 HACS → Integrations → 搜 **`HAOS Dashboard`** → **Install**
+4. **Settings → System → Restart Home Assistant**（HACS 装完**不自动重启**）
+
+**方法 B：手动（不用 HACS）**
+
+1. 从 https://github.com/kou147258/haos-ha/releases 下载 `haos-1.1.3.zip`
+2. 解压得到 `haos/` 文件夹，拷贝到 HA 配置目录的 `custom_components/`：
+   - HAOS：`/config/custom_components/haos/`
+   - 也可通过 **Samba add-on** 或 **Studio Code Server** 拖进去
+3. 重启 HA（同上）
+
+### 装 add-on `HAOS Dashboard Display`（仅 HAOS / Supervised）
+
+显示器模式——把上面那些数据画到 `/dev/fb0`。
+
+1. **Settings → Add-ons → Add-on Store** → 底部 ⋮ → **Repositories**
+2. 粘贴 `https://github.com/kou147258/haos-ha`，**Add**
+3. 列表里搜 **HAOS Dashboard Display**（slug 是 `haos_fb`）→ **Install**
+4. **Configuration** 页签调参数（见下表）→ **Start**
+5. HA Supervisor 自动从 `ghcr.io/kou147258/haos-fb-{arch}:1.1.3` 拉镜像，`{arch}` 替换成宿主机架构（amd64 / aarch64 / armv7 / armhf / i386）
+
+### 验证 `sensor.haos_info`
+
+**Developer Tools → States** → 搜 `sensor.haos_info`：
+
+- **State**：`2026.8.0 · OS · 234 entities`（HAOS 用户，Container / Core 部署类似）
+- **Attributes** 展开能看到：
+  - `ha_core_version` / `ha_installation_type` / `ha_arch` / `ha_python_version` / `ha_time_zone` / `ha_location_name`
+  - `hassio`（bool，是否有 Supervisor）
+  - `supervisor_version` / `supervisor_healthy` / `supervisor_update_available`（HAOS 才有）
+  - `haos_version` / `haos_board`（HAOS 才有）
+  - `integration_version` / `integration_loaded_at` / `integration_last_refresh`
+  - `addon_slug` / `addon_version` / `addon_state`
+  - `entity_count` / `device_count` / `integration_count`（跟随 coordinator 主刷新）
+
+**Container / Core 部署**：所有 `supervisor_*` / `haos_*` / `addon_*` 字段会缺失（被 `build_attributes` 过滤掉 None），**属于正常**——不是 bug。
+
+### 集成版本与 HA 版本对应
+
+| 集成版本 | 状态 | 说明 |
+|---|---|---|
+| 1.0.0 | 早期 release | 未在真机验证 |
+| 1.1.0 | 早期 release | 加了 `sensor.haos_info`，未在真机验证 |
+| 1.1.1 | ⚠️ **加载失败** | frozen dataclass 不接受 `value_fn` kwarg |
+| 1.1.2 | ⚠️ **加载失败** | 修 frozen 但用了 subclass，仍被 metaclass 拒绝 |
+| **1.1.3** | ✅ **可用** | 去掉 SensorEntityDescription subclass，温度 sensor unique_id 用 `(group, index)` |
+
+如果 HA 版本 < 2026.8，看 **Developer Tools → About** 升级。
+
+### add-on 装不上 / 拉 repo SSL 错误
+
+```
+Cmd('git') failed due to: exit code(128)
+stderr: 'fatal: unable to access 'https://github.com/...': OpenSSL SSL_read:
+error:0A000126:SSL routines::unexpected eof while reading'
+```
+
+这是 **HAOS 容器到 GitHub 的 TLS 握手被中间设备打断**——公司网关 / VPN / 防火墙 / GFW / MTU 不匹配，**不是代码 bug**。
+
+**Fix A：手动放 `/addons/local/`（最快，5 分钟搞定）**
+
+1. 浏览器下载 https://github.com/kou147258/haos-ha/archive/refs/tags/v1.1.3.zip
+2. 解压后只取 `haos-ha-1.1.3/haos_fb/` 整个文件夹
+3. 通过 Samba / SSH 拷到 HAOS 的 `/addons/local/haos_fb/`
+4. **Settings → Add-ons → Add-on Store** → **⋮ → Reload** → 顶部出现 **Local add-ons** → Install `HAOS Dashboard Display`
+
+> 集成部分也是同样手动法：`haos-1.1.3.zip` 解压得到 `haos/` 拷到 `/config/custom_components/haos/`。
+
+**Fix B：改用 SSH URL（HAOS 标准做法）**
+
+1. HAOS SSH 里 `ssh-keygen -t ed25519 -C "haos-supervisor"`
+2. `cat ~/.ssh/id_ed25519.pub` 把公钥加到 GitHub → Settings → SSH and GPG keys
+3. add-on repo 改填 `git@github.com:kou147258/haos-ha.git`
+
+**Fix C：调 MTU（如果是 Hyper-V / VirtualBox 上的 HAOS）**
+
+```bash
+echo 'interface eth0
+  mtu 1400' >> /etc/dhcpcd.conf
+reboot
+```
+
+**诊断命令**（把输出贴出来能精准定根因）：
+
+```bash
+date                                          # 时间对吗
+nslookup github.com                           # DNS 解析对吗
+curl -vI https://github.com 2>&1 | head -30   # HTTPS 握手能完成吗
+git clone https://github.com/kou147258/haos-ha /tmp/test --depth=1 2>&1 | tail -10
+```
+
+### add-on 配置项
+
+**Configuration** 页签（YAML 格式）：
+
+| 字段 | 取值 | 默认 |
+|---|---|---|
+| `theme` | `midnight` / `graphite` / `emerald` / `sunshine` / `cherry` / `cloud` | `midnight` |
+| `accent` | 空（用主题默认）/`cyan purple emerald amber rose blue indigo lime orange pink teal yellow` / `#rrggbb` | 空 |
+| `refresh` | 1–30 秒 | `2` |
+| `temp_unit` | `C` / `F` | `C` |
+| `page_interval` | 0 = 不自动翻页，>0 = 间隔秒数 | `0` |
+| `pages` | 任意子集：`status` `cpu` `memory` `network` `disks` `info` | 全部 |
+
+### 显示哪些 entity
+
+装完会出现一个 **HAOS Dashboard** 设备，下属这些实体：
+
+**Sensors（`sensor.haos_*`）**
+
+- `cpu_usage` / `cpu_core_<n>`（每核一个） / `cpu_load_1_min` / `cpu_frequency` / `cpu_temperature`
+- `memory_usage` / `memory_used` / `_total` / `_available`
+- `swap_usage` / `swap_used` / `swap_total`
+- `network_upload` / `_download`（KB/s）/ `network_bytes_sent` / `_bytes_received`（累计 bytes）
+- `disk_<mount>_percent` / `_used` / `_free` / `_total`（每个挂载点一组）
+- `temperature_<label>`（每个 psutil 温度探头一个，**含同名重复**——用 index 区分）
+- `uptime` / `processes` / `hostname` / `operating_system`
+- `info` — 短摘要 `"<版本> · <安装类型> · <实体数> entities"`，完整 attrs 见 `extra_state_attributes`
+
+**Binary sensor + Switch**
+
+- `binary_sensor.display_running` — add-on 是否在跑（HAOS 才有数据）
+- `switch.display_enabled` — 通过 Supervisor API 启停 add-on
+
+**Services**
+
+- `haos.refresh_display` — 强制 add-on 立即重绘
+- `haos.reload_themes` — 重载集成选项
+
+### 集成 vs add-on 关系
+
+- **只装集成**：全部 sensor 可用，但显示器黑屏。**适合不需要外接屏的用户。**
+- **只装 add-on**：白装——add-on 拉的是 `sensor.haos_*` entities，没集成就没数据源。
+- **两个都装**：全功能。
+
+### 常见问题
+
+| 症状 | 排查 |
+|---|---|
+| HACS 找不到 `HAOS Dashboard` | 没正确加 Custom Repository。重新加 `https://github.com/kou147258/haos-ha` 选 Integration |
+| `Home Assistant version is not supported` | HA < 2026.8，Settings → About 查版本升级 |
+| `sensor.haos_info` state 是 `unknown` / `unavailable` | 看 log：`async_collect_info` 失败。Logger → `custom_components.haos` |
+| 所有 supervisor / haos 字段缺失 | 你在 Container / Core 部署，不是 HAOS |
+| add-on 拉镜像失败 / GHCR 401 | GitHub PAT 没 `read:packages` scope。HACS 用你账号 token 拉包 |
+| HACS 装完 sensor 全 unavailable | 重启 HA（HACS 装完**不自动重启**） |
+| 显示器没画面但 add-on 在跑 | `/dev/fb0` 没暴露给 HAOS 容器。add-on config.yaml 已配 `devices: /dev/fb0`，但需要 HAOS 主机本身有 `/dev/fb0` |
+| `Platform haos does not generate unique IDs` | 你的 HA 版本太低装的是 1.1.0 / 1.1.1。**装 1.1.3** |
+
+
+</details>
+
+---
+
 Adapted from [neon9809/haos](https://github.com/neon9809/haos)
 with the fnOS-specific parts (FPK packaging, udev rules, CGI gateway, `/vol*`
 detection, `.neon-dash` module system) removed — keeping only the two parts
@@ -261,6 +438,8 @@ git push origin v1.0.0
 
 ---
 
+
+
 ## License
 
 MIT. See `LICENSE`.
@@ -272,174 +451,3 @@ the maintainer's blessing.
 
 ---
 
-## 简体中文
-
-通用 Linux 系统监控 + `/dev/fb0` 显示器渲染器，打包成 **HA 自定义集成**（HACS）+ **HA Supervisor 插件**（仅 HAOS 用）。
-
-源自 [neon9809/haos](https://github.com/neon9809/haos)，去掉了 fnOS 特有的 FPK 打包 / udev 规则 / CGI 网关 / `/vol*` 探测 / `.neon-dash` 模块系统，**只保留**两件事：
-
-1. **系统监控** — CPU / 内存 / Swap / 磁盘 / 网络 / 温度 / 启动时间 / 进程数 / 主机名 / OS
-2. **显示器模式** — 把这些数据实时画到 `/dev/fb0`（HAOS 专用，走 Supervisor 插件）
-
-### 要求
-
-- **Home Assistant 2026.8 或更高**（用了 `async_get_system_info` + HA 2026.8 引入的 frozen `SensorEntityDescription` + `FrozenOrThawed` metaclass）
-- 显示器模式只在 **HAOS / Supervised** 可用（需要 Supervisor）；Container / Core 部署只能装集成
-
-### 装集成 `haos`（2 选 1）
-
-**方法 A：HACS Custom Repository（推荐）**
-
-1. HA → **HACS** → **Integrations** → 右上 ⋮ → **Custom repositories**
-2. Repository 填 `https://github.com/kou147258/haos-ha`，Category 选 `Integration`，点 **Add**
-3. 回到 HACS → Integrations → 搜 **`HAOS Dashboard`** → **Install**
-4. **Settings → System → Restart Home Assistant**（HACS 装完**不自动重启**）
-
-**方法 B：手动（不用 HACS）**
-
-1. 从 https://github.com/kou147258/haos-ha/releases 下载 `haos-1.1.3.zip`
-2. 解压得到 `haos/` 文件夹，拷贝到 HA 配置目录的 `custom_components/`：
-   - HAOS：`/config/custom_components/haos/`
-   - 也可通过 **Samba add-on** 或 **Studio Code Server** 拖进去
-3. 重启 HA（同上）
-
-### 装 add-on `HAOS Dashboard Display`（仅 HAOS / Supervised）
-
-显示器模式——把上面那些数据画到 `/dev/fb0`。
-
-1. **Settings → Add-ons → Add-on Store** → 底部 ⋮ → **Repositories**
-2. 粘贴 `https://github.com/kou147258/haos-ha`，**Add**
-3. 列表里搜 **HAOS Dashboard Display**（slug 是 `haos_fb`）→ **Install**
-4. **Configuration** 页签调参数（见下表）→ **Start**
-5. HA Supervisor 自动从 `ghcr.io/kou147258/haos-fb-{arch}:1.1.3` 拉镜像，`{arch}` 替换成宿主机架构（amd64 / aarch64 / armv7 / armhf / i386）
-
-### 验证 `sensor.haos_info`
-
-**Developer Tools → States** → 搜 `sensor.haos_info`：
-
-- **State**：`2026.8.0 · OS · 234 entities`（HAOS 用户，Container / Core 部署类似）
-- **Attributes** 展开能看到：
-  - `ha_core_version` / `ha_installation_type` / `ha_arch` / `ha_python_version` / `ha_time_zone` / `ha_location_name`
-  - `hassio`（bool，是否有 Supervisor）
-  - `supervisor_version` / `supervisor_healthy` / `supervisor_update_available`（HAOS 才有）
-  - `haos_version` / `haos_board`（HAOS 才有）
-  - `integration_version` / `integration_loaded_at` / `integration_last_refresh`
-  - `addon_slug` / `addon_version` / `addon_state`
-  - `entity_count` / `device_count` / `integration_count`（跟随 coordinator 主刷新）
-
-**Container / Core 部署**：所有 `supervisor_*` / `haos_*` / `addon_*` 字段会缺失（被 `build_attributes` 过滤掉 None），**属于正常**——不是 bug。
-
-### 集成版本与 HA 版本对应
-
-| 集成版本 | 状态 | 说明 |
-|---|---|---|
-| 1.0.0 | 早期 release | 未在真机验证 |
-| 1.1.0 | 早期 release | 加了 `sensor.haos_info`，未在真机验证 |
-| 1.1.1 | ⚠️ **加载失败** | frozen dataclass 不接受 `value_fn` kwarg |
-| 1.1.2 | ⚠️ **加载失败** | 修 frozen 但用了 subclass，仍被 metaclass 拒绝 |
-| **1.1.3** | ✅ **可用** | 去掉 SensorEntityDescription subclass，温度 sensor unique_id 用 `(group, index)` |
-
-如果 HA 版本 < 2026.8，看 **Developer Tools → About** 升级。
-
-### add-on 装不上 / 拉 repo SSL 错误
-
-```
-Cmd('git') failed due to: exit code(128)
-stderr: 'fatal: unable to access 'https://github.com/...': OpenSSL SSL_read:
-error:0A000126:SSL routines::unexpected eof while reading'
-```
-
-这是 **HAOS 容器到 GitHub 的 TLS 握手被中间设备打断**——公司网关 / VPN / 防火墙 / GFW / MTU 不匹配，**不是代码 bug**。
-
-**Fix A：手动放 `/addons/local/`（最快，5 分钟搞定）**
-
-1. 浏览器下载 https://github.com/kou147258/haos-ha/archive/refs/tags/v1.1.3.zip
-2. 解压后只取 `haos-ha-1.1.3/haos_fb/` 整个文件夹
-3. 通过 Samba / SSH 拷到 HAOS 的 `/addons/local/haos_fb/`
-4. **Settings → Add-ons → Add-on Store** → **⋮ → Reload** → 顶部出现 **Local add-ons** → Install `HAOS Dashboard Display`
-
-> 集成部分也是同样手动法：`haos-1.1.3.zip` 解压得到 `haos/` 拷到 `/config/custom_components/haos/`。
-
-**Fix B：改用 SSH URL（HAOS 标准做法）**
-
-1. HAOS SSH 里 `ssh-keygen -t ed25519 -C "haos-supervisor"`
-2. `cat ~/.ssh/id_ed25519.pub` 把公钥加到 GitHub → Settings → SSH and GPG keys
-3. add-on repo 改填 `git@github.com:kou147258/haos-ha.git`
-
-**Fix C：调 MTU（如果是 Hyper-V / VirtualBox 上的 HAOS）**
-
-```bash
-echo 'interface eth0
-  mtu 1400' >> /etc/dhcpcd.conf
-reboot
-```
-
-**诊断命令**（把输出贴出来能精准定根因）：
-
-```bash
-date                                          # 时间对吗
-nslookup github.com                           # DNS 解析对吗
-curl -vI https://github.com 2>&1 | head -30   # HTTPS 握手能完成吗
-git clone https://github.com/kou147258/haos-ha /tmp/test --depth=1 2>&1 | tail -10
-```
-
-### add-on 配置项
-
-**Configuration** 页签（YAML 格式）：
-
-| 字段 | 取值 | 默认 |
-|---|---|---|
-| `theme` | `midnight` / `graphite` / `emerald` / `sunshine` / `cherry` / `cloud` | `midnight` |
-| `accent` | 空（用主题默认）/`cyan purple emerald amber rose blue indigo lime orange pink teal yellow` / `#rrggbb` | 空 |
-| `refresh` | 1–30 秒 | `2` |
-| `temp_unit` | `C` / `F` | `C` |
-| `page_interval` | 0 = 不自动翻页，>0 = 间隔秒数 | `0` |
-| `pages` | 任意子集：`status` `cpu` `memory` `network` `disks` `info` | 全部 |
-
-### 显示哪些 entity
-
-装完会出现一个 **HAOS Dashboard** 设备，下属这些实体：
-
-**Sensors（`sensor.haos_*`）**
-
-- `cpu_usage` / `cpu_core_<n>`（每核一个） / `cpu_load_1_min` / `cpu_frequency` / `cpu_temperature`
-- `memory_usage` / `memory_used` / `_total` / `_available`
-- `swap_usage` / `swap_used` / `swap_total`
-- `network_upload` / `_download`（KB/s）/ `network_bytes_sent` / `_bytes_received`（累计 bytes）
-- `disk_<mount>_percent` / `_used` / `_free` / `_total`（每个挂载点一组）
-- `temperature_<label>`（每个 psutil 温度探头一个，**含同名重复**——用 index 区分）
-- `uptime` / `processes` / `hostname` / `operating_system`
-- `info` — 短摘要 `"<版本> · <安装类型> · <实体数> entities"`，完整 attrs 见 `extra_state_attributes`
-
-**Binary sensor + Switch**
-
-- `binary_sensor.display_running` — add-on 是否在跑（HAOS 才有数据）
-- `switch.display_enabled` — 通过 Supervisor API 启停 add-on
-
-**Services**
-
-- `haos.refresh_display` — 强制 add-on 立即重绘
-- `haos.reload_themes` — 重载集成选项
-
-### 集成 vs add-on 关系
-
-- **只装集成**：全部 sensor 可用，但显示器黑屏。**适合不需要外接屏的用户。**
-- **只装 add-on**：白装——add-on 拉的是 `sensor.haos_*` entities，没集成就没数据源。
-- **两个都装**：全功能。
-
-### 常见问题
-
-| 症状 | 排查 |
-|---|---|
-| HACS 找不到 `HAOS Dashboard` | 没正确加 Custom Repository。重新加 `https://github.com/kou147258/haos-ha` 选 Integration |
-| `Home Assistant version is not supported` | HA < 2026.8，Settings → About 查版本升级 |
-| `sensor.haos_info` state 是 `unknown` / `unavailable` | 看 log：`async_collect_info` 失败。Logger → `custom_components.haos` |
-| 所有 supervisor / haos 字段缺失 | 你在 Container / Core 部署，不是 HAOS |
-| add-on 拉镜像失败 / GHCR 401 | GitHub PAT 没 `read:packages` scope。HACS 用你账号 token 拉包 |
-| HACS 装完 sensor 全 unavailable | 重启 HA（HACS 装完**不自动重启**） |
-| 显示器没画面但 add-on 在跑 | `/dev/fb0` 没暴露给 HAOS 容器。add-on config.yaml 已配 `devices: /dev/fb0`，但需要 HAOS 主机本身有 `/dev/fb0` |
-| `Platform haos does not generate unique IDs` | 你的 HA 版本太低装的是 1.1.0 / 1.1.1。**装 1.1.3** |
-
-### License
-
-MIT。详见 `LICENSE`。
