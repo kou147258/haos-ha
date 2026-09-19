@@ -252,20 +252,35 @@ haos-ha/
 
 ### 1. Install the custom integration (HACS)
 
-Easiest is HACS → Custom repositories → add this repo URL → install the
-`haos` integration.
+1. HA → **HACS** → **Integrations** (top tab) → top-right ⋮ → **Custom repositories**.
+2. The dialog asks for two fields:
+   - **Repository**: `https://github.com/kou147258/haos-ha`
+   - **Category**: `Integration`
+3. Click **Add**. The repo now appears in the list — open it and install
+   the **`HAOS Dashboard`** integration (current version: 1.1.4).
+4. **Settings → System → Restart Home Assistant**. HACS does **not**
+   auto-restart on a custom-component install.
 
-Without HACS, copy `custom_components/haos/` into your HA
-`config/custom_components/` directory and restart.
+Without HACS at all, copy `custom_components/haos/` into your HA
+`config/custom_components/` directory and restart. If HACS fails to
+clone this repo (SSL handshake errors are common on networks with
+middleboxes), skip HACS entirely and use
+[§3. Manual install](#3-manual-install-offline-friendly-no-git) below.
 
 ### 2. Install the display add-on (HA OS only)
 
-If you're on HA OS:
+The display mode is a Supervisor add-on so it requires **HA OS** or
+**Supervised**. On HA Core / Container, skip this section (the
+integration still works; the display just has no host process to drive
+`/dev/fb0`).
 
-1. Settings → Add-ons → Add-on Store → ⋮ → **Repositories**
-2. Paste this repo's URL, then refresh.
-3. Install **HAOS Dashboard Display** (`haos_fb`).
-4. Open the add-on's Settings page. Optionally tweak:
+1. **Settings → Add-ons → Add-on Store** → bottom-right ⋮ → **Repositories**.
+2. Paste `https://github.com/kou147258/haos-ha` (the Repository dialog
+   here has **no category field** — unlike HACS, Supervisor add-on
+   stores don't differentiate) → **Add**.
+3. The store list reloads. Search **HAOS Dashboard Display** (slug
+   `haos_fb`) → **Install**.
+4. Open the add-on's **Configuration** tab. Optionally tweak:
    - `theme`: `midnight` / `graphite` / `emerald` / `sunshine` / `cherry` / `cloud`
    - `accent`: blank (use theme default) or one of `cyan purple emerald amber
      rose blue indigo lime orange pink teal yellow` or a `#rrggbb` hex
