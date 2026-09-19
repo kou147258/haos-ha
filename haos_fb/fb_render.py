@@ -1,4 +1,4 @@
-﻿"""HAOS Dashboard Display — /dev/fb0 renderer for the HA Supervisor add-on.
+"""HAOS Dashboard Display — /dev/fb0 renderer for the HA Supervisor add-on.
 
 Adapted from neon9809/haos's ``app/bin/fb_render.py``. Material
 changes vs. the original:
@@ -1118,6 +1118,29 @@ def _resolve_page_renderers(renderer: PageRenderer) -> dict[str, Callable[[dict[
     }
 
 
+def _read_text(path: str) -> str:
+    """Read a /proc or /sys file, returning a string for logging."""
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read().strip()
+
+
+def _list_dev_fb() -> str:
+    """List /dev/fb* entries via glob (avoids depending on `ls`)."""
+    import glob
+    entries = sorted(glob.glob("/dev/fb*"))
+    if not entries:
+        return "<no /dev/fb* nodes>"
+    out: list[str] = []
+    for path in entries:
+        try:
+            st = os.stat(path)
+            out.append(f"{path} (mode={oct(st.st_mode)} uid={st.st_uid} "
+                       f"gid={st.st_gid} dev={oct(st.st_rdev)})")
+        except OSError as err:
+            out.append(f"{path} <stat failed: {err}>")
+    return "\n".join(out)
+
+
 async def run(args: argparse.Namespace) -> None:
     """Entry point dispatched on --dump-png vs. real fb0."""
     cfg = parse_config(args.config)
@@ -1136,14 +1159,60 @@ async def run(args: argparse.Namespace) -> None:
         try:
             fb.open()
         except Exception as err:
-            _LOGGER.error("Cannot open %s: %s", fb.device, err)
-            sys.exit(1)
-        info = fb.info
-        _LOGGER.info(
-            "fb0 opened: %dx%d, %d bpp, stride=%d",
-            info.width, info.height, info.bpp, info.stride,
-        )
-        canvas = fb
+            # /dev/fb0 open failed. This happens when the add-on container
+            # lacks the cgroup device permissions, when the host's fb driver
+            # is write-only (efifb), or when the device node is orphaned
+            # (driver not loaded). Collect as much diagnostic detail as we
+            # can before falling back to headless PNG mode — the integration
+            # user can then attach the Log tab to a GitHub issue and we can
+            # see exactly why without SSH-ing into HAOS.
+            _LOGGER.error(
+                "Cannot open %s: %s (errno=%s). Falling back to headless PNG "
+                "output. Diagnostic dump follows:",
+                fb.device, err, getattr(err, "errno", "?"),
+            )
+            for label, fn in (
+                ("uid/gid", lambda: f"uid={os.getuid()} gid={os.getgid()}"),
+                ("cgroup", lambda: _read_text("/proc/self/cgroup")),
+                ("device cgroup allow",
+                 lambda: _read_text("/sys/fs/cgroup/devices.allow")),
+                ("ls /dev/fb*",
+                 lambda: "\n".join(_read_text("/dev").splitlines()) if False
+                              else _list_dev_fb()),
+                ("/proc/fb", lambda: _read_text("/proc/fb")),
+            ):
+                try:
+                    _LOGGER.error("  %s: %s", label, fn())
+                except Exception as diag_err:  # noqa: BLE001
+                    _LOGGER.error("  %s: <unavailable: %s>", label, diag_err)
+
+            # Switch to headless mode and dump frames to /share so the user
+            # can at least see the dashboard rendered correctly while we
+            # sort the cgroup / driver issue out.
+            width = cfg.get("fb_width") or 1024
+            height = cfg.get("fb_height") or 768
+            args.dump_png = "/share/haos_fb/snapshot.png"
+            try:
+                os.makedirs(os.path.dirname(args.dump_png), exist_ok=True)
+            except OSError as mk_err:
+                _LOGGER.error("Cannot create %s: %s",
+                              os.path.dirname(args.dump_png), mk_err)
+            canvas = PILCanvas(width, height)
+            _LOGGER.warning(
+                "Running in headless PNG fallback mode. Frames will be "
+                "dumped to %s; tail the Log tab for real-time updates.",
+                args.dump_png,
+            )
+            args.headless_loop = True
+            _LOGGER.info("dump-png fallback: %dx%d -> %s",
+                         width, height, args.dump_png)
+        else:
+            info = fb.info
+            _LOGGER.info(
+                "fb0 opened: %dx%d, %d bpp, stride=%d",
+                info.width, info.height, info.bpp, info.stride,
+            )
+            canvas = fb
 
     renderer = PageRenderer(canvas, font, palette)
     pages = cfg.get("pages") or ["status"]
@@ -1197,7 +1266,17 @@ async def run(args: argparse.Namespace) -> None:
             renderer.render_footer(active_pages, current_page, seconds_left)
             if not online:
                 renderer.render_offline(last_snapshot)
-            canvas.flush()
+            if getattr(args, "headless_loop", False):
+                # Headless fallback: dump a PNG snapshot every refresh tick so
+                # the user can preview the dashboard via /share without a real
+                # framebuffer device being accessible.
+                try:
+                    canvas.save(args.dump_png)
+                except OSError as dump_err:
+                    _LOGGER.error("PNG dump to %s failed: %s",
+                                  args.dump_png, dump_err)
+            else:
+                canvas.flush()
 
             if first_render:
                 _LOGGER.info("First frame rendered (%s)", page_name)
