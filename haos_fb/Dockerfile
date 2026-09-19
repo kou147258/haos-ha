@@ -19,6 +19,7 @@ RUN apk add --no-cache \
         tzdata \
         ttf-dejavu \
         terminus-font \
+        libdrm \
     && rm -rf /var/cache/apk/*
 
 # Workdir
@@ -28,6 +29,7 @@ WORKDIR /opt/haos_fb
 COPY themes.py /opt/haos_fb/themes.py
 COPY font.py /opt/haos_fb/font.py
 COPY fb_render.py /opt/haos_fb/fb_render.py
+COPY drm_render.py /opt/haos_fb/drm_render.py
 COPY run.sh /opt/haos_fb/run.sh
 
 RUN chmod a+x /opt/haos_fb/run.sh
