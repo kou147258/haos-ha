@@ -114,13 +114,23 @@ def _install_ha_stubs() -> None:
         CELSIUS = "°C"
         FAHRENHEIT = "°F"
         SECONDS = "s"
-        BYTES = "B"
         MEGAHERTZ = "MHz"
         KILOBYTES_PER_SECOND = "kB/s"
+        MEGABYTES_PER_SECOND = "MB/s"
+
+    # UnitOfInformation needs the larger set of memory units (the integration
+    # reports memory / network totals in GB / MB explicitly to bypass HA's
+    # automatic conversion -- see sensor.py).
+    class _UnitOfInformation:
+        BYTES = "B"
+        KILOBYTES = "kB"
+        MEGABYTES = "MB"
+        GIGABYTES = "GB"
+        TERABYTES = "TB"
 
     const.UnitOfDataRate = _Unit
     const.UnitOfFrequency = _Unit
-    const.UnitOfInformation = _Unit
+    const.UnitOfInformation = _UnitOfInformation
     const.UnitOfTemperature = _Unit
     const.UnitOfTime = _Unit
     sys.modules["homeassistant.const"] = const

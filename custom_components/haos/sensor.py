@@ -122,16 +122,19 @@ _VALUE_FNS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "cpu_freq": lambda d: d.get("cpu", {}).get("freq_mhz"),
     "cpu_temp": lambda d: d.get("cpu", {}).get("temp"),
     "memory_percent": lambda d: d.get("memory", {}).get("percent"),
-    "memory_used": lambda d: d.get("memory", {}).get("used"),
-    "memory_total": lambda d: d.get("memory", {}).get("total"),
-    "memory_free": lambda d: d.get("memory", {}).get("free"),
+    # Memory in GB (decimal: 1 GB = 1e9 bytes, matching HA's default).
+    "memory_used": lambda d: _bytes_to_gb(d.get("memory", {}).get("used")),
+    "memory_total": lambda d: _bytes_to_gb(d.get("memory", {}).get("total")),
+    "memory_free": lambda d: _bytes_to_gb(d.get("memory", {}).get("free")),
     "swap_percent": lambda d: d.get("memory", {}).get("swap_percent"),
-    "swap_used": lambda d: d.get("memory", {}).get("swap_used"),
-    "swap_total": lambda d: d.get("memory", {}).get("swap_total"),
-    "net_up": lambda d: d.get("network", {}).get("up_kbps"),
-    "net_down": lambda d: d.get("network", {}).get("down_kbps"),
-    "net_bytes_sent": lambda d: d.get("network", {}).get("bytes_sent"),
-    "net_bytes_recv": lambda d: d.get("network", {}).get("bytes_recv"),
+    "swap_used": lambda d: _bytes_to_gb(d.get("memory", {}).get("swap_used")),
+    "swap_total": lambda d: _bytes_to_gb(d.get("memory", {}).get("swap_total")),
+    # Network rate in MB/s (decimal: 1 MB/s = 1000 KB/s).
+    "net_up": lambda d: _kbps_to_mbps(d.get("network", {}).get("up_kbps")),
+    "net_down": lambda d: _kbps_to_mbps(d.get("network", {}).get("down_kbps")),
+    # Network total bytes in MB (decimal: 1 MB = 1e6 bytes).
+    "net_bytes_sent": lambda d: _bytes_to_mb(d.get("network", {}).get("bytes_sent")),
+    "net_bytes_recv": lambda d: _bytes_to_mb(d.get("network", {}).get("bytes_recv")),
     "uptime": lambda d: d.get("uptime_seconds"),
     "processes": lambda d: d.get("processes"),
     "hostname": lambda d: d.get("hostname"),
@@ -139,11 +142,46 @@ _VALUE_FNS: dict[str, Callable[[dict[str, Any]], Any]] = {
 }
 
 
-def _disk_value(data: dict[str, Any], mount: str, key: str) -> Any:
-    """Look up the value of a disk metric for a given mount."""
+def _bytes_to_gb(b: Any) -> float | None:
+    """Convert bytes to GB (decimal). None stays None."""
+    if b is None:
+        return None
+    return round(b / 1e9, 4)
+
+
+def _bytes_to_mb(b: Any) -> float | None:
+    """Convert bytes to MB (decimal). None stays None."""
+    if b is None:
+        return None
+    return round(b / 1e6, 4)
+
+
+def _kbps_to_mbps(kbps: Any) -> float | None:
+    """Convert KB/s to MB/s (decimal). None stays None."""
+    if kbps is None:
+        return None
+    return round(kbps / 1000.0, 4)
+
+
+def _disk_value(data: dict[str, Any], mount: str, key: str, *, unit: str = "bytes") -> Any:
+    """Look up the value of a disk metric for a given mount.
+
+    ``unit``:
+        "bytes" -- return raw bytes (used for percent / count display).
+        "gb" / "mb" -- convert to that unit (decimal).
+    """
     for disk in data.get("disks", []):
         if disk.get("mount") == mount:
-            return disk.get(key)
+            raw = disk.get(key)
+            if raw is None:
+                return None
+            if unit == "bytes":
+                return raw
+            if unit == "gb":
+                return round(raw / 1e9, 4)
+            if unit == "mb":
+                return round(raw / 1e6, 4)
+            return raw
     return None
 
 
@@ -207,7 +245,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:memory",
         device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfInformation.BYTES,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
         suggested_display_precision=0,
     ),
     "memory_total": SensorEntityDescription(
@@ -217,7 +255,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:memory",
         device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfInformation.BYTES,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
         suggested_display_precision=0,
     ),
     "memory_free": SensorEntityDescription(
@@ -227,7 +265,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:memory",
         device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfInformation.BYTES,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
         suggested_display_precision=0,
     ),
     "swap_percent": SensorEntityDescription(
@@ -246,7 +284,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:harddisk",
         device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfInformation.BYTES,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
         suggested_display_precision=0,
     ),
     "swap_total": SensorEntityDescription(
@@ -256,7 +294,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:harddisk",
         device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfInformation.BYTES,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
         suggested_display_precision=0,
     ),
     "net_up": SensorEntityDescription(
@@ -266,7 +304,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:upload",
         device_class=SensorDeviceClass.DATA_RATE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfDataRate.KILOBYTES_PER_SECOND,
+        native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
         suggested_display_precision=1,
     ),
     "net_down": SensorEntityDescription(
@@ -276,7 +314,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:download",
         device_class=SensorDeviceClass.DATA_RATE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfDataRate.KILOBYTES_PER_SECOND,
+        native_unit_of_measurement=UnitOfDataRate.MEGABYTES_PER_SECOND,
         suggested_display_precision=1,
     ),
     "net_bytes_sent": SensorEntityDescription(
@@ -286,7 +324,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:upload-network",
         device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement=UnitOfInformation.BYTES,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
         suggested_display_precision=0,
     ),
     "net_bytes_recv": SensorEntityDescription(
@@ -296,7 +334,7 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         icon="mdi:download-network",
         device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement=UnitOfInformation.BYTES,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
         suggested_display_precision=0,
     ),
     "uptime": SensorEntityDescription(
@@ -323,12 +361,14 @@ _STATIC_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
         translation_key="hostname",
         name="Hostname",
         icon="mdi:server",
+        suggested_display_precision=0,
     ),
     "os": SensorEntityDescription(
         key="os",
         translation_key="os",
         name="Operating System",
         icon="mdi:linux",
+        suggested_display_precision=0,
     ),
 }
 
@@ -362,14 +402,6 @@ def _disk_sensors_for_mount(
         DiskSensor(coordinator, entry, disk, "free", safe, "Free"),
         DiskSensor(coordinator, entry, disk, "total", safe, "Total"),
     ]
-
-
-def _disk_value(data: dict[str, Any], mount: str, key: str) -> Any:
-    """Look up the value of a disk metric for a given mount."""
-    for disk in data.get("disks", []):
-        if disk.get("mount") == mount:
-            return disk.get(key)
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +511,7 @@ class DiskSensor(_BaseSensor):
             icon="mdi:harddisk",
             device_class=SensorDeviceClass.DATA_SIZE,
             state_class=SensorStateClass.MEASUREMENT,
-            native_unit_of_measurement=UnitOfInformation.BYTES,
+            native_unit_of_measurement=UnitOfInformation.GIGABYTES,
             suggested_display_precision=0,
         ),
         "free": SensorEntityDescription(
@@ -489,7 +521,7 @@ class DiskSensor(_BaseSensor):
             icon="mdi:harddisk",
             device_class=SensorDeviceClass.DATA_SIZE,
             state_class=SensorStateClass.MEASUREMENT,
-            native_unit_of_measurement=UnitOfInformation.BYTES,
+            native_unit_of_measurement=UnitOfInformation.GIGABYTES,
             suggested_display_precision=0,
         ),
         "total": SensorEntityDescription(
@@ -499,7 +531,7 @@ class DiskSensor(_BaseSensor):
             icon="mdi:harddisk",
             device_class=SensorDeviceClass.DATA_SIZE,
             state_class=SensorStateClass.MEASUREMENT,
-            native_unit_of_measurement=UnitOfInformation.BYTES,
+            native_unit_of_measurement=UnitOfInformation.GIGABYTES,
             suggested_display_precision=0,
         ),
     }
@@ -517,9 +549,12 @@ class DiskSensor(_BaseSensor):
         self._disk_mount = disk["mount"]
         self._metric = metric
         self.entity_description = self._DISK_DESCRIPTIONS[metric]
-        # Bind mount + metric into a closure for the value extractor.
+        # "percent" stays raw; byte metrics get converted to GB.
+        unit = "bytes" if metric == "percent" else "gb"
+        # Bind mount + metric + unit into a closure for the value extractor.
         self._value_fn = (
-            lambda d, m=self._disk_mount, k=self._metric: _disk_value(d, m, k)
+            lambda d, m=self._disk_mount, k=self._metric, u=unit:
+            _disk_value(d, m, k, unit=u)
         )
         self._attr_unique_id = f"{entry.entry_id}_disk_{safe_mount}_{metric}"
         self._attr_translation_placeholders = {"mount": disk["mount"]}

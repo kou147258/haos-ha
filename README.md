@@ -138,13 +138,17 @@ git clone https://github.com/kou147258/haos-ha /tmp/test --depth=1 2>&1 | tail -
 **Sensors（`sensor.haos_*`）**
 
 - `cpu_usage` / `cpu_core_<n>`（每核一个） / `cpu_load_1_min` / `cpu_frequency` / `cpu_temperature`
-- `memory_usage` / `memory_used` / `_total` / `_available`
-- `swap_usage` / `swap_used` / `swap_total`
-- `network_upload` / `_download`（KB/s）/ `network_bytes_sent` / `_bytes_received`（累计 bytes）
-- `disk_<mount>_percent` / `_used` / `_free` / `_total`（每个挂载点一组）
+- `memory_usage` / `memory_used` / `_total` / `_available`（**显示 GB**）
+- `swap_usage` / `swap_used` / `swap_total`（**显示 GB**）
+- `network_upload` / `_download`（**显示 MB/s**）/ `network_bytes_sent` / `_bytes_received`（累计，**显示 MB**）
+- `disk_<mount>_percent` / `_used` / `_free` / `_total`（每个挂载点一组，size 用 **GB**）
 - `temperature_<label>`（每个 psutil 温度探头一个，**含同名重复**——用 index 区分）
 - `uptime` / `processes` / `hostname` / `operating_system`
 - `info` — 短摘要 `"<版本> · <安装类型> · <实体数> entities"`，完整 attrs 见 `extra_state_attributes`
+
+**显示精度**：整数 / 字节类（内存、磁盘、网络累计、CPU 频率、uptime、进程数、主机名、OS）= **0 位小数**；百分比 / 温度 / 速率（CPU%、内存%、温度、上下行速率）= **1 位小数**；`load_1` = **2 位小数**。
+
+**单位固定为 GB / MB / MB-s**——不走 HA 自动换算（切 Imperial / Metric 不会改变仪表盘显示）。
 
 **Binary sensor + Switch**
 
@@ -298,7 +302,7 @@ After install you'll see one device `HAOS Dashboard` with:
 - `sensor.haos_cpu_frequency` — MHz
 - `sensor.haos_cpu_temperature` — °C / °F
 - `sensor.haos_memory_usage` — %
-- `sensor.haos_memory_used` / `_total` / `_available` — bytes
+- `sensor.haos_memory_used` / `_total` / `_available` — GB
 - `sensor.haos_swap_usage` / `_used` / `_total`
 - `sensor.haos_network_upload` / `_download` — KB/s
 - `sensor.haos_network_bytes_sent` / `_bytes_received` — total bytes
