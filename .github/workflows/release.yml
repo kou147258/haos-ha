@@ -87,6 +87,11 @@ jobs:
     if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
 
     steps:
+      - name: Checkout
+        # Need this to read haos_fb/config.yaml below. Without it, the
+        # runner has no working tree and Python can't open the file.
+        uses: actions/checkout@v4
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
