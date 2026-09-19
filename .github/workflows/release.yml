@@ -26,14 +26,19 @@ jobs:
         include:
           - arch: aarch64
             platform: linux/arm64
+            base-image: ghcr.io/hassio-addons/base/aarch64:15.0.2
           - arch: amd64
             platform: linux/amd64
+            base-image: ghcr.io/hassio-addons/base/amd64:15.0.2
           - arch: armv7
             platform: linux/arm/v7
+            base-image: ghcr.io/hassio-addons/base/armv7:15.0.2
           - arch: armhf
             platform: linux/arm/v6
+            base-image: ghcr.io/hassio-addons/base/armhf:15.0.2
           - arch: i386
             platform: linux/386
+            base-image: ghcr.io/hassio-addons/base/i386:15.0.2
 
     steps:
       - name: Checkout
@@ -47,6 +52,9 @@ jobs:
           echo "Addon version: $VERSION"
 
       - name: Set up QEMU (for non-amd64 builds)
+        # CRITICAL: must come BEFORE setup-buildx-action. GitHub Actions
+        # runners are x86-64; building for arm/v7/armv6/i386 needs binfmt
+        # QEMU user-space emulation registered before Buildx picks a builder.
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -66,6 +74,9 @@ jobs:
           context: ./haos_fb
           file: ./haos_fb/Dockerfile
           platforms: ${{ matrix.platform }}
+          # build-from forwards matrix.base-image as the BUILD_FROM arg that
+          # our Dockerfile's `FROM ${BUILD_FROM}` consumes.
+          build-from: ${{ matrix.base-image }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:${{ steps.version.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:latest
