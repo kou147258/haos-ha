@@ -1,7 +1,7 @@
 {
   "domain": "haos",
   "name": "HAOS Dashboard",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "documentation": "https://github.com/neon9809/haos-ha",
   "issue_tracker": "https://github.com/neon9809/haos-ha/issues",
   "codeowners": ["@neon9809"],
