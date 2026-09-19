@@ -1,0 +1,15 @@
+# HA Supervisor custom-repository manifest.
+#
+# Without this file at the repository root, Supervisor has to fall back to
+# scanning every sub-directory for an `config.yaml`. In recent Supervisor
+# releases that fallback is unreliable and produces
+# "is not a valid app repository" — the same symptom users see when the
+# URL parses but the manifest is missing.
+#
+# Pinning a slug list also stops Supervisor from picking up anything else
+# that may live in the repo (e.g. `tests/`, tooling) as a candidate add-on.
+name: "HAOS Dashboard"
+url: "https://github.com/kou147258/haos-ha"
+maintainer: "neon9809 <neon9809@users.noreply.github.com>"
+slug:
+  - haos_fb
