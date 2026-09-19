@@ -9,6 +9,5 @@
   "iot_class": "local_polling",
   "integration_type": "device",
   "quality_scale": "silver",
-  "requirements": ["psutil>=5.9.0,<7.0.0"],
   "dependencies": []
 }
