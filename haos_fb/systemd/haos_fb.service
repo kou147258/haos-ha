@@ -1,0 +1,50 @@
+# systemd unit for running the HAOS Dashboard Display renderer directly on
+# the HAOS host, bypassing the Supervisor add-on container.
+#
+# Why this exists
+# ---------------
+# HAOS x86_64 ships with a kiosk-mode Supervisor that locks user-namespace
+# containers out of kernel I/O memory (efifb's framebuffer is mapped via
+# vm_iomap_memory, which the kernel LSM rejects from userns with EINVAL
+# even when the container has SYS_RAWIO + full_access + privileged).
+# Running this script as a host-side systemd service sidesteps the
+# user-namespace LSM check entirely: host root can mmap iomem directly.
+#
+# Deployment
+# ----------
+# 1. Copy fb_render.py + themes.py + font.py + options.example.json
+#    into /data/etc/services/haos_fb/ on the HAOS host (or wherever
+#    Supervisor allows writes — /data is the only fully-writable tree
+#    on HAOS).
+# 2. Place this unit at /data/etc/services/haos_fb/haos_fb.service,
+#    and have supervisor load it (or symlink it into
+#    /etc/systemd/system/ if your HAOS build accepts that).
+# 3. systemctl daemon-reload && systemctl enable --now haos_fb.service
+#
+# A bundled bootstrap script is provided at `run-host.sh` to install the
+# service and start it in one shot.
+
+[Unit]
+Description=HAOS Dashboard Display (host-side fb0 renderer)
+Documentation=https://github.com/kou147258/haos-ha
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# Edit WorkingDirectory to wherever you unpacked the renderer files.
+WorkingDirectory=/data/etc/services/haos_fb
+# Edit the URL to point at your HA Core instance (use http://supervisor:8123
+# if you want this service to talk to HA via the Supervisor proxy).
+ExecStart=/usr/bin/python3 /data/etc/services/haos_fb/fb_render.py \
+    --config /data/etc/services/haos_fb/options.json
+Restart=on-failure
+RestartSec=5
+# Keep stdout/stderr in journald so `journalctl -u haos_fb` is the
+# single source of diagnostic truth.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
