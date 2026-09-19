@@ -21,6 +21,8 @@ Generic-Linux system monitor + `/dev/fb0` display renderer, repackaged as a
 - **Home Assistant 2026.8 或更高**（用了 `async_get_system_info` + HA 2026.8 引入的 frozen `SensorEntityDescription` + `FrozenOrThawed` metaclass）
 - 显示器模式只在 **HAOS / Supervised** 可用（需要 Supervisor）；Container / Core 部署只能装集成
 
+> **⚠️ 网络受限？** 如果 HACS / HAOS add-on store 走 HTTPS 拉 GitHub 时报 `OpenSSL SSL_read: ... unexpected EOF while reading` —— 这是 HAOS 到 GitHub 的 TLS 链路被中间设备打断，**不是代码 bug**。**直接看下文 "Fix A：手动放 `/addons/local/`"**（最下面"add-on 装不上 / 拉 repo SSL 错误"段），下 `haos-1.1.4.zip` + `v1.1.4.zip` 拷文件就行，不必修网络。
+
 ### 装集成 `haos`（2 选 1）
 
 **方法 A：HACS Custom Repository（推荐）**
@@ -289,6 +291,63 @@ python3 haos_fb/fb_render.py \
 The renderer only needs read access to `/dev/fb0`.
 
 ---
+
+### 3. Manual install (offline-friendly, no git)
+
+If the standard HACS / add-on Store install fails with
+
+```
+fatal: unable to access 'https://github.com/...': OpenSSL SSL_read:
+error:0A000126:SSL routines::unexpected eof while reading
+```
+
+(typical when a middlebox on the HAOS → GitHub path resets the TLS
+handshake), skip both `git clone` paths. Same end state as the HACS /
+Store routes, no network fix required.
+
+**3a. Integration (no HACS)**
+
+1. Download `haos-1.1.4.zip` from
+   [Releases → v1.1.4](https://github.com/kou147258/haos-ha/releases/tag/v1.1.4).
+2. Unzip — you get a `haos/` folder.
+3. Copy `haos/` into your HA config directory:
+   - HAOS / Supervised: `/config/custom_components/haos/`
+   - Easiest path from Windows: install the **Samba share** add-on
+     (`\\<haos-ip>\config\` becomes a normal network drive) or the
+     **Studio Code Server** add-on (drag-and-drop in its file tree).
+4. **Settings → System → Restart Home Assistant** (HACS restarts for you
+   automatically; the manual install does not).
+
+**3b. Display add-on (HAOS only, no Store)**
+
+1. Download the source archive:
+   `https://github.com/kou147258/haos-ha/archive/refs/tags/v1.1.4.zip`
+2. Unzip — take only the `haos_fb/` folder.
+3. Get it onto the HAOS host:
+   - **Samba share** add-on → drop `haos_fb/` into `/config/`
+   - **Advanced SSH & Web Terminal** add-on → `scp` or paste via shell
+4. Move it into the local-addon path:
+   ```bash
+   # HAOS host shell
+   mv /config/haos_fb /addons/local/haos_fb
+   ```
+5. **Settings → Add-ons → Add-on Store** → ⋮ → **Reload**.
+6. The top of the page now shows a **Local add-ons** section with
+   **HAOS Dashboard Display** → **Install** → **Start**.
+
+**If you'd rather diagnose the SSL error** so future installs just work,
+run these in the HAOS shell and post the output:
+
+```bash
+date
+nslookup github.com
+curl -vI https://github.com 2>&1 | head -30
+git clone https://github.com/kou147258/haos-ha /tmp/test --depth=1 2>&1 | tail -10
+```
+
+Common fixes once we know which layer fails: NTP time drift, wrong DNS,
+MTU 1400 on Hyper-V / VirtualBox, or switching to SSH URL after adding
+the host key to GitHub.
 
 ## What you get in HA
 
