@@ -1,8 +1,8 @@
 name: "HAOS Dashboard Display"
-version: "1.1.6"
+version: "1.1.7"
 slug: "haos_fb"
 description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
-url: "https://github.com/neon9809/haos-ha"
+url: "https://github.com/kou147258/haos-ha"
 arch:
   - aarch64
   - amd64
@@ -38,13 +38,14 @@ options:
     - memory
     - network
     - disks
+    - info
 schema:
-  theme: "list(midnight|graphite|emerald|sunshine|cherry|cloud)"
+  theme: "match(midnight|graphite|emerald|sunshine|cherry|cloud)"
   accent: "str?"
   refresh: "int(1,30)"
-  temp_unit: "list(C|F)"
-  rotate: "list(0|90|180|270)"
+  temp_unit: "match(C|F)"
+  rotate: "match(0|90|180|270)"
   screen_inches: "float(0,100)"
   page_interval: "int(0,300)"
-  pages: "list(status|cpu|memory|network|disks|info)"
+  pages: "list(match(status|cpu|memory|network|disks|info))"
 image: "ghcr.io/kou147258/haos-fb-{arch}"
