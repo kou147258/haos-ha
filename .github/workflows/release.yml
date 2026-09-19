@@ -110,14 +110,18 @@ jobs:
         run: |
           VERSION=$(python -c "import yaml; print(yaml.safe_load(open('haos_fb/config.yaml'))['version'])")
           OWNER="${{ github.repository_owner }}"
+          # Both source images and the resulting manifest need the `ghcr.io/`
+          # prefix. Without it, `docker buildx imagetools` defaults to Docker
+          # Hub, which fails with `insufficient_scope: authorization failed`
+          # because the GITHUB_TOKEN has no Docker Hub credentials.
           docker buildx imagetools create \
-            --tag "${OWNER}/haos-fb:${VERSION}" \
-            --tag "${OWNER}/haos-fb:latest" \
-            "${OWNER}/haos-fb-aarch64:${VERSION}" \
-            "${OWNER}/haos-fb-amd64:${VERSION}" \
-            "${OWNER}/haos-fb-armv7:${VERSION}" \
-            "${OWNER}/haos-fb-armhf:${VERSION}" \
-            "${OWNER}/haos-fb-i386:${VERSION}"
+            --tag "ghcr.io/${OWNER}/haos-fb:${VERSION}" \
+            --tag "ghcr.io/${OWNER}/haos-fb:latest" \
+            "ghcr.io/${OWNER}/haos-fb-aarch64:${VERSION}" \
+            "ghcr.io/${OWNER}/haos-fb-amd64:${VERSION}" \
+            "ghcr.io/${OWNER}/haos-fb-armv7:${VERSION}" \
+            "ghcr.io/${OWNER}/haos-fb-armhf:${VERSION}" \
+            "ghcr.io/${OWNER}/haos-fb-i386:${VERSION}"
 
   release:
     name: Create GitHub release
