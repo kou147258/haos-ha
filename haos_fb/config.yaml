@@ -1,5 +1,5 @@
 name: "HAOS Dashboard Display"
-version: "1.2.2"
+version: "1.2.3"
 slug: "haos_fb"
 description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
 url: "https://github.com/kou147258/haos-ha"

@@ -8,11 +8,12 @@ changes vs. the original:
     the add-on environment as ``SUPERVISOR_TOKEN``.
   * No fnOS CGI gateway / FPK packaging / fnOS-specific ``/vol*`` handling.
   * Renderer is canvas-agnostic: it can target the real ``/dev/fb0`` device
-    via mmap, **or** a PIL-backed in-memory image via ``--dump-png``. The
-    ``PILCanvas`` keeps the entire ``PageRenderer`` reusable for dev work
-    on machines without a connected display.
+    via mmap, the modern ``/dev/dri/card0`` via DRM/KMS (see
+    ``drm_render.py``), **or** a PIL-backed in-memory image via
+    ``--dump-png``. The ``PILCanvas`` keeps the entire ``PageRenderer``
+    reusable for dev work on machines without a connected display.
 
-The renderer opens ``/dev/fb0`` (or a PIL image), then runs a render loop
+The renderer picks an output backend at startup, then runs a render loop
 that alternates between enabled pages at ``page_interval`` seconds. When HA
 is unreachable the last good frame is retained and an ``OFFLINE`` badge is
 overlaid in the corner.
@@ -41,6 +42,11 @@ try:
     import fcntl  # POSIX only — used by FrameBuffer for flock + ioctl
 except ImportError:  # pragma: no cover — Windows dev preview
     fcntl = None  # type: ignore[assignment]
+
+try:
+    from drm_render import DRMCanvas as _DRMCanvas  # noqa: F401
+except ImportError:  # libdrm missing — we still degrade to PILCanvas.
+    _DRMCanvas = None  # type: ignore[assignment]
 
 from font import load_font
 from themes import resolve_palette
@@ -1141,6 +1147,23 @@ def _list_dev_fb() -> str:
     return "\n".join(out)
 
 
+def _list_dev_dri() -> str:
+    """List /dev/dri/* entries via glob — used by the DRM fallback path."""
+    import glob
+    entries = sorted(glob.glob("/dev/dri/*"))
+    if not entries:
+        return "<no /dev/dri/* nodes>"
+    out: list[str] = []
+    for path in entries:
+        try:
+            st = os.stat(path)
+            out.append(f"{path} (mode={oct(st.st_mode)} uid={st.st_uid} "
+                       f"gid={st.st_gid} dev={oct(st.st_rdev)})")
+        except OSError as err:
+            out.append(f"{path} <stat failed: {err}>")
+    return "\n".join(out)
+
+
 async def run(args: argparse.Namespace) -> None:
     """Entry point dispatched on --dump-png vs. real fb0."""
     cfg = parse_config(args.config)
@@ -1155,57 +1178,18 @@ async def run(args: argparse.Namespace) -> None:
         canvas = PILCanvas(width, height)
         _LOGGER.info("dump-png mode: %dx%d -> %s", width, height, args.dump_png)
     else:
+        # Try legacy /dev/fb0 first; if it fails (most common: efifb iomem
+        # mmap is rejected by kernel LSM inside user-namespace containers),
+        # fall through to the modern DRM/KMS path on /dev/dri/card0.
+        canvas = None
         fb = FrameBuffer(args.fb_device)
         try:
             fb.open()
         except Exception as err:
-            # /dev/fb0 open failed. This happens when the add-on container
-            # lacks the cgroup device permissions, when the host's fb driver
-            # is write-only (efifb), or when the device node is orphaned
-            # (driver not loaded). Collect as much diagnostic detail as we
-            # can before falling back to headless PNG mode — the integration
-            # user can then attach the Log tab to a GitHub issue and we can
-            # see exactly why without SSH-ing into HAOS.
-            _LOGGER.error(
-                "Cannot open %s: %s (errno=%s). Falling back to headless PNG "
-                "output. Diagnostic dump follows:",
-                fb.device, err, getattr(err, "errno", "?"),
-            )
-            for label, fn in (
-                ("uid/gid", lambda: f"uid={os.getuid()} gid={os.getgid()}"),
-                ("cgroup", lambda: _read_text("/proc/self/cgroup")),
-                ("device cgroup allow",
-                 lambda: _read_text("/sys/fs/cgroup/devices.allow")),
-                ("ls /dev/fb*",
-                 lambda: "\n".join(_read_text("/dev").splitlines()) if False
-                              else _list_dev_fb()),
-                ("/proc/fb", lambda: _read_text("/proc/fb")),
-            ):
-                try:
-                    _LOGGER.error("  %s: %s", label, fn())
-                except Exception as diag_err:  # noqa: BLE001
-                    _LOGGER.error("  %s: <unavailable: %s>", label, diag_err)
-
-            # Switch to headless mode and dump frames to /share so the user
-            # can at least see the dashboard rendered correctly while we
-            # sort the cgroup / driver issue out.
-            width = cfg.get("fb_width") or 1024
-            height = cfg.get("fb_height") or 768
-            args.dump_png = "/share/haos_fb/snapshot.png"
-            try:
-                os.makedirs(os.path.dirname(args.dump_png), exist_ok=True)
-            except OSError as mk_err:
-                _LOGGER.error("Cannot create %s: %s",
-                              os.path.dirname(args.dump_png), mk_err)
-            canvas = PILCanvas(width, height)
             _LOGGER.warning(
-                "Running in headless PNG fallback mode. Frames will be "
-                "dumped to %s; tail the Log tab for real-time updates.",
-                args.dump_png,
+                "%s open failed (%s); will try /dev/dri/card0 via DRM/KMS.",
+                fb.device, err,
             )
-            args.headless_loop = True
-            _LOGGER.info("dump-png fallback: %dx%d -> %s",
-                         width, height, args.dump_png)
         else:
             info = fb.info
             _LOGGER.info(
@@ -1213,6 +1197,56 @@ async def run(args: argparse.Namespace) -> None:
                 info.width, info.height, info.bpp, info.stride,
             )
             canvas = fb
+
+        if canvas is None:
+            try:
+                drm = _DRMCanvas("/dev/dri/card0")
+                drm.open()
+            except Exception as err:
+                _LOGGER.error(
+                    "DRM/KMS open failed too (%s). Diagnostic dump follows; "
+                    "falling back to headless PNG output.",
+                    err,
+                )
+                for label, fn in (
+                    ("uid/gid", lambda: f"uid={os.getuid()} gid={os.getgid()}"),
+                    ("cgroup", lambda: _read_text("/proc/self/cgroup")),
+                    ("device cgroup allow",
+                     lambda: _read_text("/sys/fs/cgroup/devices.allow")),
+                    ("ls /dev/fb*", _list_dev_fb),
+                    ("ls /dev/dri*", _list_dev_dri),
+                    ("/proc/fb", lambda: _read_text("/proc/fb")),
+                    ("/sys/class/graphics/fb0/name",
+                     lambda: _read_text("/sys/class/graphics/fb0/name")),
+                ):
+                    try:
+                        _LOGGER.error("  %s: %s", label, fn())
+                    except Exception as diag_err:  # noqa: BLE001
+                        _LOGGER.error("  %s: <unavailable: %s>", label, diag_err)
+
+                width = cfg.get("fb_width") or 1024
+                height = cfg.get("fb_height") or 768
+                args.dump_png = "/share/haos_fb/snapshot.png"
+                try:
+                    os.makedirs(os.path.dirname(args.dump_png), exist_ok=True)
+                except OSError as mk_err:
+                    _LOGGER.error("Cannot create %s: %s",
+                                  os.path.dirname(args.dump_png), mk_err)
+                canvas = PILCanvas(width, height)
+                _LOGGER.warning(
+                    "Running in headless PNG fallback mode. Frames will be "
+                    "dumped to %s; tail the Log tab for real-time updates.",
+                    args.dump_png,
+                )
+                args.headless_loop = True
+                _LOGGER.info("dump-png fallback: %dx%d -> %s",
+                             width, height, args.dump_png)
+            else:
+                _LOGGER.info(
+                    "DRM/KMS opened: %dx%d via /dev/dri/card0",
+                    drm.width, drm.height,
+                )
+                canvas = drm
 
     renderer = PageRenderer(canvas, font, palette)
     pages = cfg.get("pages") or ["status"]
