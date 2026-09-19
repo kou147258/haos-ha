@@ -13,7 +13,11 @@ on:
 
 permissions:
   contents: write
-  packages: write
+  # packages: read is needed by `docker buildx imagetools create` in the
+  # manifest job — it pulls per-arch images before creating the
+  # multi-arch manifest. Without this scope, GITHUB_TOKEN rejects the
+  # pull with `insufficient_scope: authorization failed`.
+  packages: read
 
 jobs:
   build-addon:
