@@ -1,7 +1,7 @@
 name: "HAOS Dashboard Display"
-version: "1.4.2"
+version: "1.5.0"
 slug: "haos_fb"
-description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
+description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel) on HAOS hosts with UEFI + discrete GPU. Falls back to headless PNG on Legacy BIOS / iGPU-only hosts."
 url: "https://github.com/kou147258/haos-ha"
 arch:
   - aarch64
