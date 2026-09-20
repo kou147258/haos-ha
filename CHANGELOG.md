@@ -7,71 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.5.0] - 2026-09-20
 
-### Removed
+### Why this release is interesting
 
-- **Supervisor add-on (`haos_fb/`) entirely removed.** The companion
-  `/dev/fb0` display renderer is no longer shipped as a HA add-on. The
-  attempt to make it work on HAOS x86_64 hit two walls that proved
-  structurally unfixable from inside a Supervisor add-on container:
+The release notes for v1.5.0 changed once after the tag was first
+published. Originally the add-on was removed entirely (HACS-only).
+After the user pointed out their hardware has an AMD discrete GPU
+(`0000:01:00.0 vendor=0x1002 device=0x6778`), the add-on was restored
+under a corrected diagnosis.
 
-  1. The kernel's LSM rejects user-namespace container `mmap(2)` of the
-     efifb framebuffer (`EINVAL`), regardless of capabilities,
-     `privileged: true`, `host_network`, `host_pid`, `init: true`, or
-     `SYS_RAWIO`.
-  2. On Legacy BIOS HAOS, `amdgpu` never claims `/dev/fb0` because
-     `efifb` early-binds it; the kernel cmdline is locked and `/sys` is
-     read-only in containers, so we can't force `amdgpu.modeset=1` or
-     unbind efifb from inside the container.
+The fundamental finding: **the add-on can drive a directly-attached
+display, but only if HAOS is booted in UEFI mode with a discrete GPU
+set as primary**. On Legacy BIOS + integrated graphics (the HAOS
+default), `efifb` early-binds `/dev/fb0` and the kernel's LSM
+rejects mmap from inside the add-on container. On UEFI, UEFI GOP
+hands the framebuffer to amdgpu directly, `efifb` never binds, and
+amdgpu's fbdev emulation creates `/dev/fb0` backed by normal page
+cache (no iomem, no LSM rejection). The add-on's render path picks
+DRM/KMS if `/dev/dri/card0` exists, otherwise direct fb0 mmap.
 
-  See README §"Display mode — why it's gone" for the full diagnosis.
-  The pre-removal code (including the `fb_render.py` / themes / fonts
-  from the original [neon9809/haos](https://github.com/neon9809/haos)
-  project) is preserved in git history through tag `v1.4.2`.
+### Added (restored after v1.5.0 first release)
 
-- **`.github/workflows/release.yml` simplified** to drop multi-arch
-  Docker build + GHCR push. Release artifact is now only the HACS
-  integration zip (`haos-1.5.0.zip`).
-
-- **Debug scripts** (`scripts/check_*.py`, `scripts/verify_v1*.py`,
-  `scripts/wait_*.py`, `scripts/force_push_v130.py`,
-  `scripts/install_v130.sh`, etc.) removed. The diagnostic scripts that
-  documented the display-mode failure
-  (`scripts/host_diag_*.py`, `scripts/host_fb0_*.py`) and the
-  SSL-bypass force-push helper (`scripts/push_via_api.py`) are kept
-  as historical record.
-
-- **`Makefile`, `dev.py`, `PUBLISHING.md`** removed (they only existed
-  for the display-mode add-on).
+- **`haos_fb/` Supervisor add-on** restored from v1.4.2:
+  - `Dockerfile`, `config.yaml`, `build.yaml`, `run.sh`,
+    `options.example.json` (add-on container image)
+  - `drm_render.py` (DRM/KMS path via libdrm; chosen when
+    `/dev/dri/card0` exists)
+  - `fb_render.py` (direct fb0 mmap; chosen when amdgpu fbdev
+    emulation provides `/dev/fb0` as normal page cache)
+  - `themes.py`, `font.py` (theme palette + bitmap font fallback)
+  - `run-host.sh` (host-side launcher; runs fb_render.py on a
+    non-HAOS Debian host with `/dev/fb0` exposed)
+  - `systemd/haos_fb.service` (host-side systemd user service unit
+    for the run-host.sh path)
+- **`.github/workflows/release.yml`** — multi-arch Docker build
+  + GHCR push for `ghcr.io/kou147258/haos-fb-{arch}` (aarch64 /
+  amd64 / armv7 / armhf / i386)
+- **`.github/workflows/ci.yml`** — `verify add-on manifest
+  essentials` step + `Render addon --dump-png` smoke test
+- **`repository.yaml`** reverted to HA Supervisor custom-repo
+  manifest (`slug: haos_fb`)
+- **README §"Display mode — when it works"** — full hardware
+  requirements list (UEFI + discrete GPU + BIOS=PEG), why Legacy
+  BIOS + iGPU doesn't work (kernel LSM rejects iomem mmap), and
+  the working-vs-not matrix across HA install types
 
 ### Changed
 
-- `custom_components/haos/manifest.json`: `version` bumped `1.1.6` →
-  `1.5.0`. `documentation` and `issue_tracker` URLs point to
-  `kou147258/haos-ha` (the user-owned fork that actually hosts the
-  release).
-- `repository.yaml` rewritten as a HACS default-repo manifest (the
-  previous form was a Supervisor add-on repo manifest).
-- `README.md` rewritten end-to-end: HACS-only install, system-monitor
-  sensor catalog, full explanation of why display mode is gone,
-  working-vs-not matrix across HA install types, version history
-  pointing to git history for the removed code.
+- README rewritten end-to-end: HACS install + add-on install +
+  manual install + sensor catalog + display-mode hardware
+  requirements + verified-vs-not matrix + dev workflow
+- `custom_components/haos/manifest.json`: `version` `1.1.6` →
+  `1.5.0`, URLs stay at `kou147258/haos-ha`
+- `.gitignore` — added `.gh_token` / `gh_token*` patterns after a
+  near-miss where the GitHub access token was briefly staged in a
+  local commit (was caught before push; the token has never been
+  on the remote, but the pattern is now ignored)
 
-### Preserved (with caveats documented)
+### Removed (cleanup, not rebuilt)
 
-- `binary_sensor.display_running` — retained for backwards
-  compatibility; reports `off` (no add-on to track).
-- `switch.display_enabled` — retained; switching has no effect.
-- `haos.refresh_display` service — retained as a no-op.
-- The integration-side reference to `ADDON_SLUG = "haos_fb"` stays so
-  these compat entities / services don't churn.
+These were deleted in the first v1.5.0 commit and stay deleted:
+
+- `Makefile`, `dev.py`, `PUBLISHING.md` (only existed for the
+  add-on dev workflow; no users depended on them)
+- 26 obsolete scripts (`scripts/check_*.py`, `verify_v1*.py`,
+  `wait_*.py`, `force_push_v130.py`, `install_v130.sh`, etc.) —
+  the diagnostics that proved useful are preserved in
+  `scripts/host_diag_*.py` and `scripts/host_fb0_*.py`
+- 4 built `haos_fb-*.zip` artifacts from the workspace root
+
+### Added (new helpers)
+
+- `scripts/push_whole_tree.py` — pushes local HEAD tree to remote
+  via the GitHub REST API, reading blob content from the local git
+  object database (works correctly when files have been deleted
+  from the working copy but the deletion is recorded in the commit
+  being pushed). The original `push_via_api.py` chokes on
+  diffs that include deleted files.
+- `scripts/tag_and_release_v150.py` — creates annotated tag +
+  GitHub Release + bundles `custom_components/haos/` into
+  `haos-1.5.0.zip` as a release asset.
+- `scripts/retry_upload_v150_asset.py` — one-off retry of the
+  release asset upload that hit a transient DNS resolution error
+  on `uploads.github.com` during the first v1.5.0 release attempt.
 
 ## [1.4.2] - 2026-09-19
 
-Last release that still shipped the Supervisor add-on. Known runtime
-failure on HAOS x86_64 + Legacy BIOS — the add-on's `fb_render.py`
-falls back to headless PNG output (`/share/haos_fb/snapshot.png`)
-because `os.open("/dev/fb0", O_RDWR)` returns `EINVAL` from inside the
-container.
+Last release whose add-on code shipped to GHCR (5 architecture
+images). Runtime failure on HAOS x86_64 + Legacy BIOS — the add-on's
+`fb_render.py` falls back to headless PNG output because
+`os.open("/dev/fb0", O_RDWR)` returns `EINVAL` from inside the
+container. `init:true` rejected by Supervisor (init is reserved for
+ssh/terminal/portainer); rolled back to direct fb0 mmap.
 
 ## [1.1.6] - 2026-09-19
 
@@ -85,5 +111,4 @@ not change the integration.
 ## Earlier releases
 
 See git history. Pre-1.5.0 tags are preserved but not documented here
-because the project pivoted away from the display-mode add-on at
-v1.5.0.
+because the project settled on its final shape at v1.5.0.

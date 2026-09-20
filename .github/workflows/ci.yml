@@ -35,6 +35,7 @@ jobs:
         run: |
           set -e
           python -m compileall -q -j 0 custom_components/haos
+          python -m compileall -q -j 0 haos_fb
           python -m compileall -q -j 0 tests
 
       - name: Validate JSON
@@ -62,7 +63,8 @@ jobs:
           set -e
           python - <<'PY'
           import sys, yaml, pathlib
-          for p in list(pathlib.Path('.github').rglob('*.y*ml')) + \
+          for p in list(pathlib.Path('haos_fb').glob('*.yaml')) + \
+                   list(pathlib.Path('.github').rglob('*.y*ml')) + \
                    [pathlib.Path('.yamllint.yml')]:
               try:
                   yaml.safe_load(open(p, encoding='utf-8'))
@@ -73,29 +75,27 @@ jobs:
           PY
 
       - name: YAML lint (yamllint)
-        run: yamllint .yamllint.yml custom_components/haos/ .github/
+        run: yamllint .yamllint.yml haos_fb/ custom_components/haos/ .github/
 
       - name: Check for placeholders
         run: |
-          ! grep -RInE 'TODO|FIXME|XXX|<placeholder>|your-token' custom_components/haos tests || (echo 'placeholders found in source'; exit 1)
+          ! grep -RInE 'TODO|FIXME|XXX|<placeholder>|your-token' custom_components/haos haos_fb tests || (echo 'placeholders found in source'; exit 1)
 
-      - name: Verify integration manifest essentials
+      - name: Verify add-on manifest essentials
         run: |
           python - <<'PY'
-          import json, sys
-          m = json.load(open('custom_components/haos/manifest.json'))
-          required = ['domain', 'name', 'version', 'config_flow', 'iot_class',
-                      'issue_tracker', 'codeowners', 'requirements']
-          missing = [k for k in required if k not in m]
+          import sys, yaml
+          data = yaml.safe_load(open('haos_fb/config.yaml', encoding='utf-8'))
+          required = ['name', 'version', 'slug', 'arch', 'startup', 'boot', 'hassio_api', 'homeassistant_api']
+          missing = [k for k in required if k not in data]
           if missing:
-              print(f'Missing manifest keys: {missing}')
+              print(f'Missing add-on manifest keys: {missing}')
               sys.exit(1)
-          if m['domain'] != 'haos':
-              print(f"Unexpected domain: {m['domain']}")
+          if data['slug'] != 'haos_fb':
+              print(f"Unexpected slug: {data['slug']}")
               sys.exit(1)
-          if not isinstance(m.get('requirements', []), list):
-              print('requirements must be a list')
-              sys.exit(1)
+          if 'python312' not in data.get('install_dep_apps', []):
+              print('Note: install_dep_apps missing — Python 3.12 must be installed manually')
           print('OK')
           PY
 
@@ -125,7 +125,7 @@ jobs:
           python -m pytest tests/ -v --tb=short --color=yes
 
   integration-smoke:
-    name: Integration smoke
+    name: Integration + addon smoke
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -159,3 +159,13 @@ jobs:
           test -f custom_components/haos/strings.json
           test -d custom_components/haos/translations
           python -c "import json; m=json.load(open('custom_components/haos/manifest.json')); assert m['domain']=='haos'; print('manifest OK')"
+
+      - name: Render addon --dump-png (validates headless code path)
+        run: |
+          python -m pip install --quiet pillow
+          python haos_fb/fb_render.py \
+              --config haos_fb/options.example.json \
+              --dump-png /tmp/preview.png \
+              --width 320 --height 240 \
+              --synthetic
+          test -s /tmp/preview.png

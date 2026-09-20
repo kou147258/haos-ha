@@ -37,6 +37,9 @@ htmlcov/
 # Local secrets / tokens
 *.token
 secrets.yaml
-secrets.jsondev-preview.png
+secrets.json
+.gh_token
+gh_token*
+dev-preview.png
 dev-overview*.png
 preview_*.png
