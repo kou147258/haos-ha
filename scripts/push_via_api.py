@@ -166,24 +166,35 @@ def main():
     )
     print(f"updated {BRANCH} -> {commit['sha']}")
 
-    # Push the tag (create it on top of the new commit).
+    # Push the tag (create or update). HTTPError is a subclass of
+    # URLError, so the order matters: catch HTTPError FIRST, otherwise
+    # every GitHub 4xx is reported as a generic URLError and the
+    # Reference-already-exists fallback never fires.
     try:
-        api(
-            "POST",
-            f"/repos/{REPO}/git/refs",
-            {"ref": f"refs/tags/{TAG}", "sha": commit["sha"]},
-        )
-        print(f"created tag {TAG}")
-    except RuntimeError as exc:
-        if "422" in str(exc) and "Reference already exists" in str(exc):
+        try:
             api(
-                "PATCH",
-                f"/repos/{REPO}/git/refs/tags/{TAG}",
-                {"sha": commit["sha"]},
+                "POST",
+                f"/repos/{REPO}/git/refs",
+                {"ref": f"refs/tags/{TAG}", "sha": commit["sha"]},
             )
-            print(f"updated existing tag {TAG}")
-        else:
-            raise
+            print(f"created tag {TAG}")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 422 and b"Reference already exists" in exc.read():
+                api(
+                    "PATCH",
+                    f"/repos/{REPO}/git/refs/tags/{TAG}",
+                    {"sha": commit["sha"]},
+                )
+                print(f"updated existing tag {TAG}")
+            else:
+                body = exc.read().decode("utf-8", "replace")
+                raise RuntimeError(
+                    f"{exc.code} {exc.reason} POST /git/refs: {body}"
+                ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"POST /git/refs urlopen failed: {exc!r} (reason={exc.reason!r})"
+        ) from exc
 
 
 if __name__ == "__main__":

@@ -21,12 +21,10 @@ from typing import Generic, TypeVar
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ADDON_DIR = REPO_ROOT / "haos_fb"
 INTEGRATION_DIR = REPO_ROOT / "custom_components" / "haos"
 
-# Make the integration + add-on importable.
+# Make the integration importable.
 sys.path.insert(0, str(REPO_ROOT))
-sys.path.insert(0, str(ADDON_DIR))
 
 
 # ---------------------------------------------------------------------------

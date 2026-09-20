@@ -7,89 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Skip pushing images / creating release (build only)'
+        description: 'Skip creating release (build only)'
         type: boolean
         default: false
 
-permissions:
-  contents: write
-  packages: write
-
 jobs:
-  build-addon:
-    name: Build add-on (${{ matrix.arch }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            platform: linux/arm64
-          - arch: amd64
-            platform: linux/amd64
-          - arch: armv7
-            platform: linux/arm/v7
-          - arch: armhf
-            platform: linux/arm/v6
-          - arch: i386
-            platform: linux/386
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Read version from add-on manifest
-        id: version
-        run: |
-          VERSION=$(python -c "import yaml; print(yaml.safe_load(open('haos_fb/config.yaml'))['version'])")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Addon version: $VERSION"
-
-      - name: Set up QEMU (for non-amd64 builds)
-        # CRITICAL: must come BEFORE setup-buildx-action. GitHub Actions
-        # runners are x86-64; building for arm/v7/armv6/i386 needs binfmt
-        # QEMU user-space emulation registered before Buildx picks a builder.
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build (and push) image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./haos_fb
-          file: ./haos_fb/Dockerfile
-          platforms: ${{ matrix.platform }}
-          # Dockerfile hardcodes a multi-arch base image (ghcr.io/hassio-addons/base:15.0.2)
-          # so no per-arch build-arg is needed.
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/haos-fb-${{ matrix.arch }}:latest
-          push: ${{ github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true' }}
-          cache-from: type=gha,scope=addon-${{ matrix.arch }}
-          cache-to: type=gha,scope=addon-${{ matrix.arch }},mode=max
-          provenance: false
-
-  # Note: no multi-arch manifest step. Home Assistant Supervisor resolves
-  # the `{arch}` placeholder in the add-on's image: field at install time
-  # and pulls the matching per-arch image (ghcr.io/<owner>/haos-fb-{arch}).
-  # Creating an OCI manifest list would require the CI token to create a
-  # new top-level package, which the GITHUB_TOKEN (a GitHub App
-  # installation) can't do when the owner is a user account instead of an
-  # org: `denied: installation not allowed to Create organization package`.
-
   release:
     name: Create GitHub release
-    needs: build-addon
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: startsWith(github.ref, 'refs/tags/v')
@@ -101,47 +25,53 @@ jobs:
       - name: Read version
         id: version
         run: |
-          VERSION=$(python -c "import yaml; print(yaml.safe_load(open('haos_fb/config.yaml'))['version'])")
+          VERSION=$(python -c "import json; print(json.load(open('custom_components/haos/manifest.json'))['version'])")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Integration version: $VERSION"
 
-      - name: Package integration ZIP
+      - name: Package integration ZIP (HACS drop-in)
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           cd custom_components
           zip -r "../haos-${VERSION}.zip" haos
 
-      - name: Package add-on ZIP (for Supervisor local install)
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cd haos_fb
-          zip -r "../haos_fb-${VERSION}.zip" .
-
       - name: Stage release notes
         run: |
-          cat > RELEASE_NOTES.md <<'EOF'
-          ## HAOS Dashboard Display add-on
+          VERSION="${{ steps.version.outputs.version }}"
+          cat > RELEASE_NOTES.md <<EOF
+          ## HAOS Dashboard integration v${VERSION}
 
-          Install via HA Supervisor → Add-on Store → ⋮ → Repositories →
-          paste this repo's URL.
+          HACS-installable Home Assistant integration that exposes HAOS host
+          system stats (CPU per-core, memory, swap, disks, network,
+          temperatures, uptime, processes, hostname, OS) as sensor entities,
+          plus an \`info\` sensor summarising HA Core / Supervisor / HAOS /
+          integration versions and live entity counts.
 
-          ### Quick start
+          ### Install via HACS
 
-          1. HACS → Custom repositories → add this repo → install
-             `haos` integration → restart HA.
-          2. HA → Add-ons → Add-on Store → install `HAOS Dashboard Display`.
-          3. Start the add-on. The `binary_sensor.haos_display_running`
-             will go `on` within ~2 s.
+          1. HA → **HACS** → **Integrations** → top-right ⋮ → **Custom repositories**
+          2. Repository: \`https://github.com/kou147258/haos-ha\`, Category: \`Integration\`
+          3. Install **HAOS Dashboard** and restart Home Assistant.
 
-          See the README for the full installation guide and per-architecture
-          multi-arch manifest.
+          ### Manual install (offline-friendly)
+
+          Download \`haos-${VERSION}.zip\` from this release, unzip to get the
+          \`haos/\` folder, and drop it into \`/config/custom_components/haos/\`.
+          Restart HA.
+
+          ### Notes on display mode
+
+          Display takeover (rendering sensor data to \`/dev/fb0\` on a directly
+          attached HDMI/VGA panel) is **not** part of v${VERSION}. It proved
+          structurally infeasible on HAOS x86_64 + Legacy BIOS because
+          \`efifb\` early-binds the framebuffer and the kernel cmdline cannot
+          be changed from a Supervisor add-on container. See README §"Why no
+          display mode" for the full diagnosis.
 
           ## Artifacts
 
-          - `haos-${VERSION}.zip` — drop-in HACS-compatible bundle
-            of the custom integration (no HACS install).
-          - ghcr.io multi-arch images — referenced automatically by the
-            add-on's `image:` field in `haos_fb/config.yaml`.
-
+          - \`haos-${VERSION}.zip\` — drop-in HACS-compatible bundle of the
+            custom integration (no HACS install required).
           EOF
 
       - name: Create release
@@ -151,6 +81,5 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             haos-${{ steps.version.outputs.version }}.zip
-            haos_fb-${{ steps.version.outputs.version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
