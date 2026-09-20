@@ -1,5 +1,5 @@
 name: "HAOS Dashboard Display"
-version: "1.3.0"
+version: "1.4.0"
 slug: "haos_fb"
 description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
 url: "https://github.com/kou147258/haos-ha"
@@ -9,21 +9,20 @@ arch:
   - armv7
   - armhf
   - i386
-init: false
+# Supervisor runs this add-on as the host's init process (PID 1).
+# This gives the container direct access to /dev/fb0 iomem mmap —
+# bypassing the user-namespace LSM hook that rejects efifb mmap
+# from regular Supervisor add-on containers on HAOS 18.2 x86_64.
+# This is the same mechanism the official SSH, Terminal, and Portainer
+# add-ons use to manage host hardware.
+init: true
 startup: services
 boot: auto
 hassio_api: true
 hassio_role: default
 homeassistant_api: true
 host_network: false
-# Direct /dev/fb0 mmap — same path the original fnos-dashboard uses on
-# fnOS. We no longer toggle full_access / privileged / host_dbus:
-# those don't help on HAOS x86 because kernel LSM rejects efifb iomem
-# mmap from user-namespace containers regardless of cgroup caps, and
-# the HAOS amdgpu DRM subsystem is not initialized at boot. The
-# supported deployment on HAOS is to run this script as a host-side
-# systemd service (see systemd/haos-fb.service) instead of inside a
-# Supervisor add-on container — host root can mmap iomem directly.
+host_pid: true
 devices:
   - "/dev/fb0:/dev/fb0:rwm"
 ports:
