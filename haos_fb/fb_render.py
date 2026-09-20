@@ -1247,7 +1247,10 @@ async def run(args: argparse.Namespace) -> None:
 
     # In --dump-png mode skip the HA client entirely; use synthetic data so
     # the preview works on a dev machine with no Home Assistant reachable.
-    if args.dump_png and (args.synthetic or not token):
+    # `--dump-png --synthetic` (dev preview) renders `args.frames` and exits;
+    # headless fallback (`args.headless_loop`) keeps looping so the PNG at
+    # /share keeps getting refreshed every refresh tick.
+    if args.dump_png and args.synthetic and not getattr(args, "headless_loop", False):
         snapshots: list[dict[str, Any]] = [
             _make_synthetic_snapshot(canvas.width, canvas.height)
             for _ in range(max(1, args.frames))
