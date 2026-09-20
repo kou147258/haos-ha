@@ -1,5 +1,5 @@
 name: "HAOS Dashboard Display"
-version: "1.4.1"
+version: "1.4.2"
 slug: "haos_fb"
 description: "Renders HAOS Dashboard system stats to /dev/fb0 (HDMI / VGA / DSI panel)."
 url: "https://github.com/kou147258/haos-ha"
@@ -9,20 +9,23 @@ arch:
   - armv7
   - armhf
   - i386
-# Supervisor runs this add-on as the host's init process (PID 1).
-# This gives the container direct access to /dev/fb0 iomem mmap —
-# bypassing the user-namespace LSM hook that rejects efifb mmap
-# from regular Supervisor add-on containers on HAOS 18.2 x86_64.
-# This is the same mechanism the official SSH, Terminal, and Portainer
-# add-ons use to manage host hardware.
-init: true
+# init: true was rejected by Supervisor schema — that's a marker reserved
+# for the official SSH/Terminal/Portainer privileged add-ons. Falling
+# back to a regular add-on container.
+#
+# The /dev/fb0 mmap path inside a regular Supervisor add-on container
+# is blocked by kernel LSM on HAOS 18.2 x86_64 (see README + memory
+# entry). v1.4.2 only guarantees the headless PNG fallback renders
+# correctly into /share/haos_fb/snapshot.png. To drive a physical
+# display, deploy the host-side systemd service shipped in
+# systemd/haos_fb.service.
+init: false
 startup: services
 boot: auto
 hassio_api: true
 hassio_role: default
 homeassistant_api: true
 host_network: false
-host_pid: true
 devices:
   - "/dev/fb0:/dev/fb0:rwm"
 ports:

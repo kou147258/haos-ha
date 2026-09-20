@@ -29,7 +29,7 @@ for _k in [
 
 REPO = "kou147258/haos-ha"
 BRANCH = "main"
-TAG = "v1.4.1"
+TAG = "v1.4.2"
 TOKEN = (
     os.environ.get("GH_TOKEN")
     or os.environ.get("GITHUB_TOKEN")
